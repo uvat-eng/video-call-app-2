@@ -18,7 +18,15 @@ export default {
 			}
 		},
 		extend: {
+			fontFamily: {
+				head: ['"Inter Tight"', 'sans-serif'],
+				body: ['Inter', 'sans-serif'],
+			},
 			colors: {
+				'tile-a': 'hsl(var(--tile-a))',
+				'tile-b': 'hsl(var(--tile-b))',
+				online: 'hsl(var(--online))',
+				'logo-bg': 'hsl(var(--logo-bg))',
 				border: 'hsl(var(--border))',
 				input: 'hsl(var(--input))',
 				ring: 'hsl(var(--ring))',
@@ -84,11 +92,21 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'ring-pulse': {
+					'0%': { transform: 'scale(1)', opacity: '0.55' },
+					'100%': { transform: 'scale(1.9)', opacity: '0' }
+				},
+				'msg-in': {
+					from: { transform: 'translateY(8px)', opacity: '0' },
+					to: { transform: 'translateY(0)', opacity: '1' }
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'ring-pulse': 'ring-pulse 1.6s ease-out infinite',
+				'msg-in': 'msg-in 0.25s ease-out'
 			}
 		}
 	},
