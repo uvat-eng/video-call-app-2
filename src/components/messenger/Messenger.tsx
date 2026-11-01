@@ -42,6 +42,7 @@ type PollResult = {
 type History = Record<number, Message[]>;
 
 const HISTORY_LIMIT = 3000;
+const UNLOCK_GRACE_MS = 30 * 60 * 1000;
 
 function Loader() {
   return (
@@ -88,6 +89,7 @@ export default function Messenger() {
 
   const openSession = (id: E2E, user: User) => {
     sessionStorage.setItem(unlockedKey(user.id), "1");
+    localStorage.setItem(unlockedKey(user.id), String(Date.now()));
     if (token) saveSwSession(token, user.id);
     setPendingE2e(null);
     setVaultMode(null);
@@ -103,7 +105,9 @@ export default function Messenger() {
         const id = await loadIdentity(await Vault.openDevice(me.id));
         await publish(id, me, token);
         const locked = await id.vault.hasLock();
-        if (locked && sessionStorage.getItem(unlockedKey(me.id)) === "1") return openSession(id, me);
+        const last = Number(localStorage.getItem(unlockedKey(me.id)) || 0);
+        const recent = Date.now() - last < UNLOCK_GRACE_MS;
+        if (locked && (sessionStorage.getItem(unlockedKey(me.id)) === "1" || recent)) return openSession(id, me);
         setPendingE2e(id);
         setVaultMode(locked ? "unlock" : "create");
       })
@@ -125,7 +129,10 @@ export default function Messenger() {
       const t = token;
       unsubscribePush(t).finally(() => api("logout", {}, t).catch(() => null));
     }
-    if (me) sessionStorage.removeItem(unlockedKey(me.id));
+    if (me) {
+      sessionStorage.removeItem(unlockedKey(me.id));
+      localStorage.removeItem(unlockedKey(me.id));
+    }
     clearSwSession();
     localStorage.removeItem(TOKEN_KEY);
     setE2e((cur) => {
@@ -457,6 +464,23 @@ function MessengerApp({
   }, [reloadVault, poll]);
 
   useEffect(() => {
+    const key = `rusapp_unlocked_${me.id}`;
+    const touch = () => localStorage.setItem(key, String(Date.now()));
+    touch();
+    const t = window.setInterval(() => {
+      if (!document.hidden) touch();
+    }, 20000);
+    const onHide = () => touch();
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onHide);
+    };
+  }, [me.id]);
+
+  useEffect(() => {
     setPush(pushState());
     setPushHidden(sessionStorage.getItem("rusapp_push_hidden") === "1");
     subscribePush(token, false)
@@ -469,6 +493,22 @@ function MessengerApp({
       setPush(await subscribePush(token, true));
     } catch {
       setPush(pushState());
+    }
+  };
+
+  const testPush = async () => {
+    try {
+      const state = await subscribePush(token, true);
+      setPush(state);
+      if (state === "denied") return "Уведомления запрещены в настройках телефона для этого сайта — разрешите их.";
+      if (state === "ios-install") return "На iPhone сначала добавьте RusAPP на экран «Домой» и откройте с иконки.";
+      if (state !== "granted") return "Этот браузер не поддерживает уведомления.";
+      const r = await api<{ sent: number; devices: number }>("push_test", {}, token);
+      return r.sent > 0
+        ? "Тестовое уведомление отправлено — оно должно появиться через пару секунд."
+        : "Не удалось доставить уведомление на это устройство. Нажмите ещё раз.";
+    } catch {
+      return "Не удалось проверить уведомления";
     }
   };
 
@@ -589,6 +629,17 @@ function MessengerApp({
     if (tab === "contacts") loadContacts();
     if (tab === "calls") loadCalls();
   }, [tab, loadContacts, loadCalls]);
+
+  const totalUnread = chats.reduce((n, c) => n + (c.unread || 0), 0);
+
+  useEffect(() => {
+    const nav = navigator as Navigator & {
+      setAppBadge?: (n?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+    if (totalUnread > 0) nav.setAppBadge?.(totalUnread).catch(() => undefined);
+    else nav.clearAppBadge?.().catch(() => undefined);
+  }, [totalUnread]);
 
   const active = chats.find((c) => c.id === activeId);
 
@@ -769,7 +820,13 @@ function MessengerApp({
           />
         )}
         {tab === "settings" && (
-          <SettingsView user={me} onSave={saveProfile} onLogout={onLogout} onClearHistory={clearHistory} />
+          <SettingsView
+            user={me}
+            onSave={saveProfile}
+            onLogout={onLogout}
+            onClearHistory={clearHistory}
+            onTestPush={testPush}
+          />
         )}
       </main>
       {groupPicker && (

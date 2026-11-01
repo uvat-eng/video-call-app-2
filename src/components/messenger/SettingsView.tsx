@@ -9,9 +9,12 @@ type Props = {
   onLogout: () => void;
   onLock?: () => void;
   onClearHistory: () => Promise<void>;
+  onTestPush?: () => Promise<string>;
 };
 
-export default function SettingsView({ user, onSave, onLogout, onLock, onClearHistory }: Props) {
+export default function SettingsView({ user, onSave, onLogout, onLock, onClearHistory, onTestPush }: Props) {
+  const [pushMsg, setPushMsg] = useState("");
+  const [testing, setTesting] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [cleared, setCleared] = useState(false);
   const [name, setName] = useState(user.name);
@@ -78,6 +81,29 @@ export default function SettingsView({ user, onSave, onLogout, onLock, onClearHi
           </div>
         </form>
 
+        {onTestPush && (
+          <div className="mt-8 flex flex-wrap items-center gap-3 rounded-[14px] bg-background p-5">
+            <Icon name="BellRing" size={18} />
+            <div className="min-w-0 flex-1">
+              <div className="font-head font-semibold">Уведомления</div>
+              <p className="text-[.85em] text-muted-foreground">
+                {pushMsg || "Проверьте, что сообщения и звонки дойдут при свёрнутом приложении."}
+              </p>
+            </div>
+            <button
+              disabled={testing}
+              onClick={async () => {
+                setTesting(true);
+                setPushMsg(await onTestPush());
+                setTesting(false);
+              }}
+              className="h-[38px] rounded-full bg-primary px-[18px] font-head font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              Проверить
+            </button>
+          </div>
+        )}
+
         <div className="mt-8 grid gap-2.5 md:grid-cols-2">
           <div className="rounded-[14px] bg-gradient-to-br from-tile-a to-tile-b p-5">
             <div className="flex items-center gap-2 font-head font-semibold">
@@ -96,8 +122,8 @@ export default function SettingsView({ user, onSave, onLogout, onLock, onClearHi
               Хранилище на устройстве
             </div>
             <p className="mt-2 text-[.87em] text-muted-foreground">
-              История и ключи хранятся только на этом устройстве и зашифрованы вашим кодом доступа. Если не открывать
-              приложение 10 минут, оно заблокируется само.
+              История и ключи хранятся только на этом устройстве в зашифрованном виде. Код доступа спрашивается
+              только после полного закрытия приложения.
             </p>
             <div className="mt-3 text-[.85em]">
               {cleared ? (

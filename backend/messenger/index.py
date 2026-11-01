@@ -225,6 +225,11 @@ def handler(event: dict, context) -> dict:
             )
             return resp(200, {"ok": True})
 
+        if action == "push_test":
+            n = send_push(cur, S, me, {"type": "test", "title": "RusAPP", "body": "Уведомления работают"}, ttl=60, urgency="high")
+            cur.execute(f"SELECT COUNT(*) AS n FROM {S}.push_subs WHERE user_id=%s", (me,))
+            return resp(200, {"sent": n, "devices": cur.fetchone()["n"]})
+
         if action == "push_unsubscribe":
             cur.execute(f"DELETE FROM {S}.push_subs WHERE endpoint=%s AND user_id=%s", (str(body.get("endpoint") or ""), me))
             return resp(200, {"ok": True})
@@ -342,8 +347,14 @@ def handler(event: dict, context) -> dict:
             r = cur.fetchone()
             cur.execute(f"SELECT name FROM {S}.users WHERE id=%s", (me,))
             my_name = cur.fetchone()["name"]
-            send_push(cur, S, peer, {"type": "message", "chatId": chat_id, "from": my_name,
-                                     "title": my_name, "body": "Новое зашифрованное сообщение"}, ttl=86400, urgency="normal")
+            cur.execute(
+                f"""SELECT COUNT(*) AS n FROM {S}.messages m JOIN {S}.chats c ON c.id=m.chat_id
+                WHERE (c.user_a=%s OR c.user_b=%s) AND m.sender_id<>%s AND m.read_at IS NULL""",
+                (peer, peer, peer),
+            )
+            badge = cur.fetchone()["n"]
+            send_push(cur, S, peer, {"type": "message", "chatId": chat_id, "from": my_name, "badge": badge,
+                                     "title": my_name, "body": "Новое сообщение"}, ttl=86400, urgency="high")
             return resp(200, {"id": r["id"], "at": r["created_at"]})
 
         if action == "poll":

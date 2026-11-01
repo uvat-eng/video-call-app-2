@@ -48,11 +48,15 @@ def send_push(cur, schema, user_id, payload, ttl=60, urgency="high"):
                 timeout=3,
             )
             sent += 1
+            print(f"push ok user={user_id} type={payload.get('type')}")
         except WebPushException as e:
             code = getattr(getattr(e, "response", None), "status_code", 0)
+            body = getattr(getattr(e, "response", None), "text", "")
+            print(f"push fail user={user_id} code={code} {str(e)[:200]} {str(body)[:200]}")
             if code in (404, 410):
                 dead.append(s["id"])
-        except Exception:
+        except Exception as e:
+            print(f"push error user={user_id} {type(e).__name__}: {str(e)[:300]}")
             continue
     if dead:
         cur.execute(f"DELETE FROM {schema}.push_subs WHERE id = ANY(%s)", (dead,))

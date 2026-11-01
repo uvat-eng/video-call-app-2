@@ -174,15 +174,21 @@ self.addEventListener("push", (event) => {
         return;
       }
       const isCall = data.type === "call" || data.type === "group_call";
-      if (!isCall && (await hasVisibleClient())) return;
+      if (data.type === "message" && data.badge && self.navigator.setAppBadge) {
+        try {
+          await self.navigator.setAppBadge(data.badge);
+        } catch (e) {}
+      }
+      if (!isCall && data.type !== "test" && (await hasVisibleClient())) return;
       const options = {
         body: data.body || "",
         icon: "/icon-192.png",
         badge: "/badge-96.png",
-        tag: isCall ? data.type + "-" + data.callId : "chat-" + data.chatId,
+        tag: isCall ? data.type + "-" + data.callId : "chat-" + (data.chatId || data.type),
         renotify: true,
+        silent: false,
         requireInteraction: isCall,
-        vibrate: isCall ? [400, 200, 400, 200, 400, 200, 400] : [200],
+        vibrate: isCall ? [400, 200, 400, 200, 400, 200, 400] : [200, 100, 200],
         data,
       };
       if (isCall) {
