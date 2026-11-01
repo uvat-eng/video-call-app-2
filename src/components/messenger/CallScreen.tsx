@@ -36,6 +36,7 @@ export default function CallScreen({ call, token, e2e, onClose }: Props) {
   const [noCamera, setNoCamera] = useState(false);
   const [remoteVideo, setRemoteVideo] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [route, setRoute] = useState<"direct" | "relay" | null>(null);
 
   const localRef = useRef<HTMLVideoElement>(null);
   const remoteRef = useRef<HTMLVideoElement>(null);
@@ -374,6 +375,45 @@ export default function CallScreen({ call, token, e2e, onClose }: Props) {
               ? "Восстанавливаем связь…"
               : fmt(seconds);
 
+  useEffect(() => {
+    if (phase !== "live" || reconnecting) {
+      if (phase !== "live") setRoute(null);
+      return;
+    }
+    let stop = false;
+    const check = async () => {
+      const pc = pcRef.current;
+      if (!pc) return;
+      try {
+        const stats = await pc.getStats();
+        let pairId = "";
+        stats.forEach((r) => {
+          if (r.type === "transport" && r.selectedCandidatePairId) pairId = r.selectedCandidatePairId;
+        });
+        let pair: RTCIceCandidatePairStats | undefined;
+        stats.forEach((r) => {
+          if (r.type === "candidate-pair" && (r.id === pairId || (!pairId && r.nominated && r.state === "succeeded")))
+            pair = r as RTCIceCandidatePairStats;
+        });
+        if (!pair) return;
+        const types: string[] = [];
+        stats.forEach((r) => {
+          if (r.id === pair!.localCandidateId || r.id === pair!.remoteCandidateId)
+            types.push((r as { candidateType?: string }).candidateType ?? "");
+        });
+        if (!stop) setRoute(types.includes("relay") ? "relay" : "direct");
+      } catch {
+        return;
+      }
+    };
+    check();
+    const t = window.setInterval(check, 5000);
+    return () => {
+      stop = true;
+      window.clearInterval(t);
+    };
+  }, [phase, reconnecting]);
+
   const showRemote = isVideo && phase === "live" && remoteVideo;
 
   return (
@@ -402,8 +442,12 @@ export default function CallScreen({ call, token, e2e, onClose }: Props) {
               isVideo ? "bg-primary-foreground/15" : "bg-card",
             )}
           >
-            <Icon name="Lock" size={12} />
-            Сквозное шифрование
+            <Icon name={route === "direct" && !reconnecting ? "ShieldCheck" : "Lock"} size={12} />
+            {phase === "live" && !reconnecting && route === "direct"
+              ? "Прямое соединение, зашифровано"
+              : phase === "live" && reconnecting
+                ? "Восстанавливаем прямое соединение"
+                : "Сквозное шифрование"}
           </span>
         </div>
 
