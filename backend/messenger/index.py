@@ -252,6 +252,13 @@ def handler(event: dict, context) -> dict:
                 cur.execute(f"DELETE FROM {S}.key_waits WHERE recipient_id=%s", (me,))
             return resp(200, {"ok": True})
 
+        if action == "peer_key":
+            cur.execute(f"SELECT public_key FROM {S}.users WHERE id=%s", (int(body.get("userId") or 0),))
+            r = cur.fetchone()
+            if not r:
+                return err(404, "Пользователь не найден")
+            return resp(200, {"publicKey": r["public_key"]})
+
         if action == "wait_key":
             chat_id = int(body.get("chatId") or 0)
             peer = chat_access(cur, me, chat_id)

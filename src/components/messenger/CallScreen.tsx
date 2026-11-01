@@ -67,10 +67,11 @@ export default function CallScreen({ call, token, e2e, onClose }: Props) {
     if (finishedRef.current) return;
     finishedRef.current = true;
     if (notify && callIdRef.current) api("call_end", { callId: callIdRef.current }, token).catch(() => null);
+    console.warn("[call] finished:", text);
     cleanup();
     setEndText(text);
     setPhase("ended");
-    window.setTimeout(onClose, 1400);
+    window.setTimeout(onClose, notify || text === "Звонок завершён" ? 1400 : 3500);
   };
 
   const attachLocal = (stream: MediaStream) => {
@@ -221,13 +222,16 @@ export default function CallScreen({ call, token, e2e, onClose }: Props) {
         stream?.getTracks().forEach((t) => t.stop());
         return;
       }
-      if (stream) attachLocal(stream);
-      const pc = setupPeer(stream);
-      await pc.setLocalDescription(await pc.createOffer());
-      await waitIce(pc);
-      if (cancelled) return;
-      if (!call.peer.publicKey) return finish(`${call.peer.name} ещё не заходил(а) в RusAPP`, false);
+      if (!stream) return finish("Нет доступа к микрофону — разрешите его в настройках браузера", false);
+      attachLocal(stream);
       try {
+        const pc = setupPeer(stream);
+        await pc.setLocalDescription(await pc.createOffer());
+        await waitIce(pc);
+        if (cancelled) return;
+        const fresh = await api<{ publicKey: string | null }>("peer_key", { userId: call.peer.id }, token);
+        if (fresh.publicKey) call.peer.publicKey = fresh.publicKey;
+        if (!call.peer.publicKey) return finish(`${call.peer.name} ещё не заходил(а) в RusAPP`, false);
         const offer = await e2e.seal(call.peer.publicKey, JSON.stringify(pc.localDescription));
         const res = await api<{ callId: number }>(
           "call_start",
