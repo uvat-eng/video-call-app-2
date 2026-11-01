@@ -9,7 +9,7 @@ import appCss from "@/index.css?url";
 
 const TITLE = "RusAPP — защищённый российский мессенджер";
 const DESCRIPTION =
-    "Без посредников и перехватов информации. Связь между двумя телефонами абонентов, без серверов и хранения информации.";
+    "Без посредников и перехватов информации. Связь между двумя телефонами абонентов, без хранения переписки на серверах.";
 const OG_IMAGE = "https://cdn.poehali.dev/projects/56349fef-92d7-4870-a37e-94d25b539997/files/94a0723f-3320-4cca-a7eb-fa331ca0ce19.jpg";
 
 export const Route = createRootRoute({

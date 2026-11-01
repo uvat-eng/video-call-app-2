@@ -44,8 +44,8 @@ export default function AuthScreen({ onAuth }: Props) {
             <h1 className="hero-title">RusAPP</h1>
             <p className="mt-3 font-head text-[1.15em] font-semibold">Защищённый российский мессенджер.</p>
             <p className="mt-2 text-muted-foreground">
-              Без посредников и перехватов информации. Связь между двумя телефонами абонентов, без серверов и хранения
-              информации.
+              Без посредников и перехватов информации. Связь между двумя телефонами абонентов, без хранения переписки на
+              серверах.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-[.85em]">
