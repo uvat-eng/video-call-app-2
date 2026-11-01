@@ -218,6 +218,17 @@ function PrivacySection({ bio, onLock, onClearHistory }: Props) {
           )}
         </div>
       </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-2 px-1 text-[.85em] text-muted-foreground">
+        <a href="/privacy" target="_blank" rel="noreferrer" className="hover:text-foreground hover:underline">
+          Политика конфиденциальности
+        </a>
+        <a href="/terms" target="_blank" rel="noreferrer" className="hover:text-foreground hover:underline">
+          Пользовательское соглашение
+        </a>
+        <a href="mailto:support@rusapp.su?subject=Удаление аккаунта RuChat" className="hover:text-foreground hover:underline">
+          Удалить аккаунт
+        </a>
+      </div>
     </div>
   );
 }

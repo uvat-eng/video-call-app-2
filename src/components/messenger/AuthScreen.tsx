@@ -118,6 +118,11 @@ export default function AuthScreen({ onAuth }: Props) {
           <p className="mt-auto pt-3 text-center text-[.8em] text-muted-foreground">
             {mode === "login" ? "Ещё нет аккаунта? Нажмите «Регистрация»" : "Друзья найдут вас по номеру телефона"}
           </p>
+          <p className="text-center text-[.75em] text-muted-foreground">
+            Продолжая, вы принимаете{" "}
+            <a href="/terms" target="_blank" rel="noreferrer" className="underline">соглашение</a> и{" "}
+            <a href="/privacy" target="_blank" rel="noreferrer" className="underline">политику конфиденциальности</a>
+          </p>
         </form>
       </div>
     </div>
