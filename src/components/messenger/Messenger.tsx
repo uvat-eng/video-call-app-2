@@ -23,6 +23,7 @@ import SettingsView from "./SettingsView";
 import AuthScreen from "./AuthScreen";
 import PinScreen from "./PinScreen";
 import PushBanner from "./PushBanner";
+import { matchContacts, type BookEntry, type PhoneContact } from "@/lib/phonebook";
 import { pushState, registerSw, subscribePush, unsubscribePush, type PushState } from "@/lib/push";
 import { cn } from "@/lib/utils";
 
@@ -145,6 +146,12 @@ export default function Messenger() {
   return <MessengerApp token={token} me={me} e2e={e2e} setMe={setMe} onLogout={logout} onLock={lock} />;
 }
 
+function mergeUsers(prev: User[], book: BookEntry[]) {
+  const map = new Map(prev.map((u) => [u.id, u]));
+  for (const b of book) if (b.user && !map.has(b.user.id)) map.set(b.user.id, b.user);
+  return [...map.values()];
+}
+
 function MessengerApp({
   token,
   me,
@@ -173,6 +180,8 @@ function MessengerApp({
   const [callsLoaded, setCallsLoaded] = useState(false);
   const [call, setCall] = useState<ActiveCall | null>(null);
   const [sendError, setSendError] = useState("");
+  const [book, setBook] = useState<BookEntry[]>([]);
+  const [syncing, setSyncing] = useState(false);
   const [push, setPush] = useState<PushState>("unsupported");
   const [pushHidden, setPushHidden] = useState(false);
 
@@ -198,6 +207,41 @@ function MessengerApp({
       .catch(() => undefined)
       .finally(() => setHistoryLoaded(true));
   }, [e2e]);
+
+  useEffect(() => {
+    e2e.vault
+      .get<PhoneContact[]>("phonebook")
+      .then(async (saved) => {
+        if (!saved?.length) return;
+        const matched = await matchContacts(token, saved);
+        setBook(matched);
+        setContacts((prev) => mergeUsers(prev, matched));
+      })
+      .catch(() => undefined);
+  }, [e2e, token]);
+
+  const syncBook = async (list: PhoneContact[]) => {
+    setSyncing(true);
+    try {
+      const prev = (await e2e.vault.get<PhoneContact[]>("phonebook")) ?? [];
+      const merged = [...prev];
+      for (const c of list) {
+        const ex = merged.find((m) => m.name === c.name);
+        if (ex) ex.phones = [...new Set([...ex.phones, ...c.phones])];
+        else merged.push(c);
+      }
+      await e2e.vault.set("phonebook", merged);
+      const matched = await matchContacts(token, merged);
+      setBook(matched);
+      setContacts((p) => mergeUsers(p, matched));
+      return null;
+    } catch (e) {
+      handleAuthError(e);
+      return e instanceof Error ? e.message : "Не удалось проверить контакты";
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const persist = useCallback(
     (next: History) => {
@@ -545,7 +589,15 @@ function MessengerApp({
         )}
         {tab === "calls" && <CallsView calls={calls} loaded={callsLoaded} onCall={startCall} />}
         {tab === "contacts" && (
-          <ContactsView contacts={contacts} onCall={startCall} onMessage={openChatWith} onAdd={addContact} />
+          <ContactsView
+            contacts={contacts}
+            onCall={startCall}
+            onMessage={openChatWith}
+            onAdd={addContact}
+            book={book}
+            syncing={syncing}
+            onSync={syncBook}
+          />
         )}
         {tab === "settings" && (
           <SettingsView user={me} onSave={saveProfile} onLogout={onLogout} onLock={onLock} onClearHistory={clearHistory} />

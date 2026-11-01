@@ -2,15 +2,21 @@ import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { presence, type CallKind, type User } from "@/lib/messenger-data";
 import UserAvatar from "./UserAvatar";
+import PhonebookPanel from "./PhonebookPanel";
+import type { BookEntry, PhoneContact } from "@/lib/phonebook";
 
 type Props = {
   contacts: User[];
   onCall: (user: User, kind: CallKind) => void;
   onMessage: (user: User) => void;
   onAdd: (phone: string) => Promise<string | null>;
+  book: BookEntry[];
+  syncing: boolean;
+  onSync: (list: PhoneContact[]) => Promise<string | null>;
 };
 
-export default function ContactsView({ contacts, onCall, onMessage, onAdd }: Props) {
+export default function ContactsView({ contacts, onCall, onMessage, onAdd, book, syncing, onSync }: Props) {
+  const bookName = (u: User) => book.find((b) => b.user?.id === u.id)?.name;
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [phone, setPhone] = useState("");
@@ -64,7 +70,7 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd }: Pro
             >
               <UserAvatar user={c} />
               <div className="min-w-0">
-                <div className="truncate font-medium">{c.name}</div>
+                <div className="truncate font-medium">{bookName(c) ?? c.name}</div>
                 <div className="truncate text-[.85em] text-muted-foreground">{presence(c)}</div>
               </div>
             </button>
@@ -73,6 +79,7 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd }: Pro
       </aside>
 
       <section className="grid min-h-0 auto-rows-min gap-2.5 overflow-y-auto md:grid-cols-2">
+        <PhonebookPanel book={book} syncing={syncing} onSync={onSync} onMessage={onMessage} onCall={onCall} />
         <form onSubmit={add} className="rounded-[14px] bg-gradient-to-br from-tile-a to-tile-b p-5 md:col-span-2 lg:p-6">
           <div className="font-head text-[1.1em] font-semibold">Добавить контакт</div>
           <p className="mb-3 text-[.85em] text-muted-foreground">Человек должен быть зарегистрирован в RusAPP</p>

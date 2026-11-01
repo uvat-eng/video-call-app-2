@@ -260,6 +260,20 @@ def handler(event: dict, context) -> dict:
             )
             return resp(200, {"contacts": [user_out(r) for r in cur.fetchall()]})
 
+        if action == "match_contacts":
+            hashes = [str(h).lower() for h in (body.get("hashes") or [])[:5000] if isinstance(h, str) and len(h) == 64]
+            if not hashes:
+                return resp(200, {"matches": []})
+            cur.execute(
+                f"""SELECT {USER_COLS}, encode(sha256(u.phone::bytea), 'hex') AS ph FROM {S}.users u
+                WHERE encode(sha256(u.phone::bytea), 'hex') = ANY(%s) AND u.id <> %s""",
+                (hashes, me),
+            )
+            rows = cur.fetchall()
+            for r in rows:
+                ensure_contact(cur, me, r["id"])
+            return resp(200, {"matches": [{"hash": r["ph"], "user": user_out(r)} for r in rows]})
+
         if action == "add_contact":
             phone = norm_phone(body.get("phone"))
             cur.execute(f"SELECT {USER_COLS} FROM {S}.users u WHERE u.phone=%s", (phone,))
