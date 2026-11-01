@@ -86,7 +86,7 @@ export default function ActiveChat({ peer, myKey, messages, loading, error, onSe
           <span>
             {peer.publicKey
               ? "Сообщения и звонки защищены сквозным шифрованием. Сервер не хранит переписку — она есть только на устройствах собеседников. Нажмите, чтобы сверить код безопасности."
-              : `${peer.name} ещё не включил(а) шифрование. Писать можно будет, когда собеседник откроет RusAPP.`}
+              : `Шифрование включено всегда. ${peer.name} ещё не заходил(а) в RusAPP — сообщения зашифруются и уйдут, как только собеседник откроет приложение.`}
             {showCode && code && (
               <span className="mt-2 grid grid-cols-3 gap-x-3 gap-y-1 font-head text-[1.15em] font-semibold tabular-nums tracking-wider">
                 {code.map((g, i) => (

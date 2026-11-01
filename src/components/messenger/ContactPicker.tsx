@@ -113,7 +113,7 @@ export default function ContactPicker({
                 <div className="min-w-0">
                   <div className="truncate font-medium">{c.name}</div>
                   <div className="truncate text-[.85em] text-muted-foreground">
-                    {disabled ? "ещё не включил(а) шифрование" : c.online ? "в сети" : c.phone}
+                    {disabled ? "ещё не заходил(а) в RusAPP" : c.online ? "в сети" : c.phone}
                   </div>
                 </div>
                 <span

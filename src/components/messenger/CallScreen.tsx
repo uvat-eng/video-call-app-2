@@ -226,7 +226,7 @@ export default function CallScreen({ call, token, e2e, onClose }: Props) {
       await pc.setLocalDescription(await pc.createOffer());
       await waitIce(pc);
       if (cancelled) return;
-      if (!call.peer.publicKey) return finish(`${call.peer.name} ещё не включил(а) шифрование`, false);
+      if (!call.peer.publicKey) return finish(`${call.peer.name} ещё не заходил(а) в RusAPP`, false);
       try {
         const offer = await e2e.seal(call.peer.publicKey, JSON.stringify(pc.localDescription));
         const res = await api<{ callId: number }>(

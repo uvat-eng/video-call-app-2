@@ -14,7 +14,7 @@ import {
   type Message,
   type User,
 } from "@/lib/messenger-data";
-import { loadIdentity, Vault, vaultExists, wipeVault, type E2E } from "@/lib/e2e";
+import { loadIdentity, Vault, vaultKind, wipeVault, type E2E } from "@/lib/e2e";
 import AppHeader, { type Tab } from "./AppHeader";
 import ChatList from "./ChatList";
 import ActiveChat from "./ActiveChat";
@@ -56,6 +56,7 @@ export default function Messenger() {
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<User | null>(null);
   const [vaultMode, setVaultMode] = useState<"create" | "unlock" | null>(null);
+  const [vaultError, setVaultError] = useState("");
   const [e2e, setE2e] = useState<E2E | null>(null);
 
   useEffect(() => {
@@ -75,12 +76,25 @@ export default function Messenger() {
       .finally(() => setReady(true));
   }, []);
 
+  const publish = async (id: E2E, user: User, t: string) => {
+    if (user.publicKey !== id.pub) {
+      await api("set_key", { publicKey: id.pub }, t);
+      setMe({ ...user, publicKey: id.pub });
+    }
+    setE2e(id);
+  };
+
   useEffect(() => {
-    if (!me || e2e) return;
-    vaultExists(me.id)
-      .then((exists) => setVaultMode(exists ? "unlock" : "create"))
-      .catch(() => setVaultMode("create"));
-  }, [me?.id, e2e]);
+    if (!me || !token || e2e) return;
+    setVaultError("");
+    vaultKind(me.id)
+      .then(async (kind) => {
+        if (kind === "pin") return setVaultMode("unlock");
+        const id = await loadIdentity(await Vault.openDevice(me.id));
+        await publish(id, me, token);
+      })
+      .catch(() => setVaultError("Не удалось подготовить защищённое хранилище на этом устройстве"));
+  }, [me?.id, token, e2e]);
 
   const onAuth = (t: string, u: User) => {
     localStorage.setItem(TOKEN_KEY, t);
@@ -90,6 +104,7 @@ export default function Messenger() {
 
   const lock = useCallback(() => {
     setE2e((cur) => {
+      if (cur && !cur.vault.pin) return cur;
       cur?.vault.close();
       return null;
     });
@@ -106,21 +121,21 @@ export default function Messenger() {
       unsubscribePush(t).finally(() => api("logout", {}, t).catch(() => null));
     }
     localStorage.removeItem(TOKEN_KEY);
-    lock();
+    setE2e((cur) => {
+      cur?.vault.close();
+      return null;
+    });
+    setVaultMode(null);
     setToken(null);
     setMe(null);
-  }, [token, lock]);
+  }, [token]);
 
   const openVault = async (pin: string) => {
     if (!me || !token) return "Нет сессии";
     try {
-      const vault = vaultMode === "create" ? await Vault.create(me.id, pin) : await Vault.unlock(me.id, pin);
-      const id = await loadIdentity(vault);
-      if (me.publicKey !== id.pub) {
-        await api("set_key", { publicKey: id.pub }, token);
-        setMe({ ...me, publicKey: id.pub });
-      }
-      setE2e(id);
+      const pinVault = await Vault.unlock(me.id, pin);
+      const vault = pinVault.pin ? await pinVault.toDevice(me.id) : pinVault;
+      await publish(await loadIdentity(vault), me, token);
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Не удалось открыть хранилище";
@@ -130,13 +145,26 @@ export default function Messenger() {
   const resetVault = async () => {
     if (!me) return;
     await wipeVault(me.id);
-    setVaultMode("create");
+    setVaultMode(null);
+    setE2e(null);
+    setMe({ ...me });
   };
 
   if (!ready) return <Loader />;
   if (!token || !me) return <AuthScreen onAuth={onAuth} />;
   if (!e2e) {
-    if (!vaultMode) return <Loader />;
+    if (vaultError)
+      return (
+        <div className="grid h-[100dvh] place-items-center bg-background p-6 text-center text-muted-foreground">
+          <div>
+            <p>{vaultError}</p>
+            <button onClick={logout} className="mt-4 rounded-full bg-primary px-5 py-2 font-head font-semibold text-primary-foreground">
+              Выйти
+            </button>
+          </div>
+        </div>
+      );
+    if (vaultMode !== "unlock") return <Loader />;
     return (
       <PinScreen
         key={vaultMode}
@@ -148,7 +176,16 @@ export default function Messenger() {
       />
     );
   }
-  return <MessengerApp token={token} me={me} e2e={e2e} setMe={setMe} onLogout={logout} onLock={lock} />;
+  return (
+    <MessengerApp
+      token={token}
+      me={me}
+      e2e={e2e}
+      setMe={setMe}
+      onLogout={logout}
+      onLock={e2e.vault.pin ? lock : undefined}
+    />
+  );
 }
 
 function mergeUsers(prev: User[], book: BookEntry[]) {
@@ -170,7 +207,7 @@ function MessengerApp({
   e2e: E2E;
   setMe: (u: User) => void;
   onLogout: () => void;
-  onLock: () => void;
+  onLock?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("chats");
   const [serverChats, setServerChats] = useState<ChatItem[]>([]);
@@ -463,7 +500,7 @@ function MessengerApp({
     let hiddenAt = 0;
     const onVis = () => {
       if (document.hidden) hiddenAt = Date.now();
-      else if (hiddenAt && Date.now() - hiddenAt > AUTO_LOCK_MS && !callRef.current) onLock();
+      else if (onLock && hiddenAt && Date.now() - hiddenAt > AUTO_LOCK_MS && !callRef.current) onLock();
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);

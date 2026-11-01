@@ -61,10 +61,15 @@ function idb<T>(db: IDBDatabase, mode: IDBTransactionMode, fn: (s: IDBObjectStor
 }
 
 export async function vaultExists(userId: number) {
+  return (await vaultKind(userId)) !== "none";
+}
+
+export async function vaultKind(userId: number): Promise<"none" | "device" | "pin"> {
   const db = await openDb(userId);
-  const meta = await idb<unknown>(db, "readonly", (s) => s.get("meta"));
+  const meta = await idb<Meta | undefined>(db, "readonly", (s) => s.get("meta"));
   db.close();
-  return !!meta;
+  if (!meta) return "none";
+  return meta.device ? "device" : "pin";
 }
 
 export function wipeVault(userId: number) {
@@ -78,7 +83,7 @@ export function wipeVault(userId: number) {
 
 /* ---------- Защищённое хранилище ---------- */
 
-type Meta = { salt: string; iter: number; check: Sealed };
+type Meta = { salt?: string; iter?: number; device?: boolean; check: Sealed };
 
 async function pinKey(pin: string, salt: Uint8Array<ArrayBuffer>, iter: number) {
   const base = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveKey"]);
@@ -94,10 +99,12 @@ async function pinKey(pin: string, salt: Uint8Array<ArrayBuffer>, iter: number) 
 export class Vault {
   private db: IDBDatabase;
   private key: CryptoKey;
+  readonly pin: boolean;
 
-  private constructor(db: IDBDatabase, key: CryptoKey) {
+  private constructor(db: IDBDatabase, key: CryptoKey, pin = true) {
     this.db = db;
     this.key = key;
+    this.pin = pin;
   }
 
   static async create(userId: number, pin: string) {
@@ -110,12 +117,33 @@ export class Vault {
     return new Vault(db, key);
   }
 
+  static async openDevice(userId: number, fresh = false) {
+    const db = await openDb(userId);
+    const meta = await idb<Meta | undefined>(db, "readonly", (s) => s.get("meta"));
+    if (meta?.device && !fresh) {
+      const key = await idb<CryptoKey | undefined>(db, "readonly", (s) => s.get("devkey"));
+      if (key) return new Vault(db, key, false);
+    }
+    db.close();
+    await wipeVault(userId);
+    const ndb = await openDb(userId);
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    await idb(ndb, "readwrite", (s) => s.put(key, "devkey"));
+    const m: Meta = { device: true, check: await aesEncrypt(key, "rusapp-ok") };
+    await idb(ndb, "readwrite", (s) => s.put(m, "meta"));
+    return new Vault(ndb, key, false);
+  }
+
   static async unlock(userId: number, pin: string) {
     const db = await openDb(userId);
     const meta = await idb<Meta | undefined>(db, "readonly", (s) => s.get("meta"));
     if (!meta) {
       db.close();
       throw new Error("Хранилище не найдено");
+    }
+    if (meta.device || !meta.salt || !meta.iter) {
+      db.close();
+      return Vault.openDevice(userId);
     }
     const key = await pinKey(pin, unb64(meta.salt), meta.iter);
     try {
@@ -125,6 +153,16 @@ export class Vault {
       throw new Error("Неверный код доступа");
     }
     return new Vault(db, key);
+  }
+
+  async toDevice(userId: number) {
+    const keys = ["identity", "history", "phonebook", "outbox"];
+    const data: Record<string, unknown> = {};
+    for (const k of keys) data[k] = await this.get(k);
+    this.close();
+    const dev = await Vault.openDevice(userId, true);
+    for (const k of keys) if (data[k] !== null) await dev.set(k, data[k]);
+    return dev;
   }
 
   async get<T>(name: string): Promise<T | null> {

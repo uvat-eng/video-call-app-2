@@ -7,7 +7,7 @@ type Props = {
   user: User;
   onSave: (name: string, status: string) => Promise<string | null>;
   onLogout: () => void;
-  onLock: () => void;
+  onLock?: () => void;
   onClearHistory: () => Promise<void>;
 };
 
@@ -38,13 +38,15 @@ export default function SettingsView({ user, onSave, onLogout, onLock, onClearHi
           <h2 className="text-[1.6em] font-semibold tracking-[-0.03em]">{user.name}</h2>
           <p className="text-muted-foreground">{user.phone}</p>
         </div>
-        <button
-          onClick={onLock}
-          className="inline-flex h-[38px] items-center gap-2 rounded-full bg-primary px-[18px] font-head font-semibold text-primary-foreground"
-        >
-          <Icon name="Lock" size={16} />
-          Заблокировать
-        </button>
+        {onLock && (
+          <button
+            onClick={onLock}
+            className="inline-flex h-[38px] items-center gap-2 rounded-full bg-primary px-[18px] font-head font-semibold text-primary-foreground"
+          >
+            <Icon name="Lock" size={16} />
+            Заблокировать
+          </button>
+        )}
         <button
           onClick={onLogout}
           className="inline-flex h-[38px] items-center gap-2 rounded-full bg-secondary px-[18px] font-head font-semibold text-secondary-foreground"

@@ -128,7 +128,7 @@ def handle(action, body, cur, S, me, resp, err):
         cur.execute(f"SELECT id FROM {S}.users WHERE id = ANY(%s) AND public_key IS NOT NULL", (ids,))
         valid = [r["id"] for r in cur.fetchall()]
         if not valid:
-            return err(400, "Никто из выбранных ещё не включил шифрование")
+            return err(400, "Никто из выбранных ещё не заходил в RusAPP")
         cur.execute(f"INSERT INTO {S}.group_calls (host_id, kind) VALUES (%s,%s) RETURNING id", (me, kind))
         call_id = cur.fetchone()["id"]
         cur.execute(
