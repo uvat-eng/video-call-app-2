@@ -154,7 +154,7 @@ def device_label(body):
 
 def incoming_call(cur, me):
     cur.execute(
-        f"""SELECT cl.id, cl.kind, cl.offer, {USER_COLS} FROM {S}.calls cl
+        f"""SELECT cl.id AS call_id, cl.kind, cl.offer, {USER_COLS} FROM {S}.calls cl
         JOIN {S}.users u ON u.id=cl.caller_id
         WHERE cl.callee_id=%s AND cl.status='ringing' AND cl.created_at > NOW() - INTERVAL '{RING_SECONDS} seconds'
         ORDER BY cl.id DESC LIMIT 1""",
@@ -163,7 +163,7 @@ def incoming_call(cur, me):
     r = cur.fetchone()
     if not r:
         return None
-    return {"id": r["id"], "kind": r["kind"], "offer": r["offer"], "peer": user_out(r)}
+    return {"id": r["call_id"], "kind": r["kind"], "offer": r["offer"], "peer": user_out(r)}
 
 
 def handler(event: dict, context) -> dict:
@@ -573,7 +573,7 @@ def handler(event: dict, context) -> dict:
 
         if action == "calls":
             cur.execute(
-                f"""SELECT cl.id, cl.kind, cl.status, cl.caller_id, cl.created_at, cl.answered_at, cl.ended_at, {USER_COLS}
+                f"""SELECT cl.id AS call_id, cl.kind, cl.status, cl.caller_id, cl.created_at, cl.answered_at, cl.ended_at, {USER_COLS}
                 FROM {S}.calls cl
                 JOIN {S}.users u ON u.id = CASE WHEN cl.caller_id=%s THEN cl.callee_id ELSE cl.caller_id END
                 WHERE cl.caller_id=%s OR cl.callee_id=%s
@@ -588,7 +588,7 @@ def handler(event: dict, context) -> dict:
                 if answered and r["ended_at"]:
                     secs = int((r["ended_at"] - r["answered_at"]).total_seconds())
                 direction = "out" if outgoing else ("in" if answered else "missed")
-                out.append({"id": r["id"], "kind": r["kind"], "direction": direction, "answered": answered,
+                out.append({"id": r["call_id"], "kind": r["kind"], "direction": direction, "answered": answered,
                             "at": r["created_at"], "seconds": secs, "peer": user_out(r)})
             return resp(200, {"calls": out, "groupCalls": group.history(cur, S, me)})
 
