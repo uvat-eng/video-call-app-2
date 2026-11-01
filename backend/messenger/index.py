@@ -52,6 +52,7 @@ def user_out(r):
         "lastSeen": r.get("last_seen"),
         "online": bool(r.get("online")),
         "publicKey": r.get("public_key"),
+        "avatar": r.get("avatar"),
     }
 
 
@@ -59,7 +60,7 @@ def th(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-USER_COLS = f"u.id, u.name, u.phone, u.status, u.last_seen, u.public_key, (u.last_seen > NOW() - INTERVAL '{ONLINE_SECONDS} seconds') AS online"
+USER_COLS = f"u.id, u.name, u.phone, u.status, u.last_seen, u.public_key, u.avatar, (u.last_seen > NOW() - INTERVAL '{ONLINE_SECONDS} seconds') AS online"
 
 
 def chat_pair(a, b):
@@ -115,16 +116,41 @@ def chat_access(cur, me, chat_id):
     return r["user_b"] if r["user_a"] == me else r["user_a"]
 
 
-def inbox(cur, me):
+def inbox(cur, me, sid, cursor):
     cur.execute(
-        f"""SELECT m.id, m.chat_id, m.cipher, m.iv, m.sender_key, m.created_at
+        f"""SELECT m.id, m.chat_id, m.sender_id, m.cipher, m.iv, m.sender_key, m.created_at
         FROM {S}.messages m JOIN {S}.chats c ON c.id=m.chat_id
-        WHERE (c.user_a=%s OR c.user_b=%s) AND m.sender_id<>%s AND m.delivered_at IS NULL AND m.cipher IS NOT NULL
+        WHERE (c.user_a=%s OR c.user_b=%s) AND m.id > %s AND m.cipher IS NOT NULL
+        AND (m.sender_id<>%s OR m.sender_session IS DISTINCT FROM %s)
         ORDER BY m.id LIMIT 200""",
-        (me, me, me),
+        (me, me, cursor, me, sid),
     )
-    return [{"id": r["id"], "chatId": r["chat_id"], "cipher": r["cipher"], "iv": r["iv"],
+    return [{"id": r["id"], "chatId": r["chat_id"], "cipher": r["cipher"], "iv": r["iv"], "mine": r["sender_id"] == me,
              "senderKey": r["sender_key"], "at": r["created_at"]} for r in cur.fetchall()]
+
+
+def purge_delivered(cur, me):
+    cur.execute(
+        f"""UPDATE {S}.messages m SET cipher=NULL, iv=NULL, sender_key=NULL
+        FROM {S}.chats c WHERE c.id=m.chat_id AND (c.user_a=%s OR c.user_b=%s) AND m.cipher IS NOT NULL
+        AND (m.created_at < NOW() - INTERVAL '30 days' OR m.id <= (
+          SELECT COALESCE(MIN(x.msg_cursor), 0) FROM {S}.sessions x
+          WHERE x.user_id IN (c.user_a, c.user_b) AND x.last_active > NOW() - INTERVAL '14 days'))""",
+        (me, me),
+    )
+
+
+def max_msg_id(cur, uid):
+    cur.execute(
+        f"""SELECT COALESCE(MAX(m.id),0) AS n FROM {S}.messages m JOIN {S}.chats c ON c.id=m.chat_id
+        WHERE c.user_a=%s OR c.user_b=%s""",
+        (uid, uid),
+    )
+    return int(cur.fetchone()["n"])
+
+
+def device_label(body):
+    return str(body.get("deviceName") or "").strip()[:120] or "Устройство"
 
 
 def incoming_call(cur, me):
@@ -184,8 +210,8 @@ def handler(event: dict, context) -> dict:
             )
             uid = cur.fetchone()["id"]
             tok = secrets.token_hex(32)
-            cur.execute(f"INSERT INTO {S}.sessions (token, user_id) VALUES (%s,%s)", (th(tok), uid))
-            return resp(200, {"token": tok, "user": {"id": uid, "name": name, "phone": phone, "status": "", "online": True, "publicKey": None}})
+            cur.execute(f"INSERT INTO {S}.sessions (token, user_id, device_name) VALUES (%s,%s,%s)", (th(tok), uid, device_label(body)))
+            return resp(200, {"token": tok, "user": {"id": uid, "name": name, "phone": phone, "status": "", "online": True, "publicKey": None, "avatar": None}})
 
         if action == "login":
             phone = norm_phone(body.get("phone"))
@@ -195,18 +221,112 @@ def handler(event: dict, context) -> dict:
             if not u or hash_pw(pw, u["salt"]) != u["password_hash"]:
                 return err(401, "Неверный номер или пароль")
             tok = secrets.token_hex(32)
-            cur.execute(f"INSERT INTO {S}.sessions (token, user_id) VALUES (%s,%s)", (th(tok), u["id"]))
+            cur.execute(
+                f"INSERT INTO {S}.sessions (token, user_id, device_name, msg_cursor) VALUES (%s,%s,%s,%s)",
+                (th(tok), u["id"], device_label(body), max_msg_id(cur, u["id"])),
+            )
             u["online"] = True
             return resp(200, {"token": tok, "user": user_out(u)})
 
         if not token:
             return err(401, "Нужно войти")
-        cur.execute(f"SELECT user_id FROM {S}.sessions WHERE token=%s", (th(token),))
+        cur.execute(f"SELECT id, user_id, msg_cursor FROM {S}.sessions WHERE token=%s", (th(token),))
         s = cur.fetchone()
         if not s:
             return err(401, "Сессия истекла, войдите снова")
         me = s["user_id"]
+        sid = s["id"]
         cur.execute(f"UPDATE {S}.users SET last_seen=NOW() WHERE id=%s", (me,))
+        cur.execute(f"UPDATE {S}.sessions SET last_active=NOW() WHERE id=%s", (sid,))
+
+        if action == "devices":
+            cur.execute(
+                f"""SELECT id, device_name, created_at, last_active FROM {S}.sessions
+                WHERE user_id=%s AND last_active > NOW() - INTERVAL '60 days' ORDER BY last_active DESC""",
+                (me,),
+            )
+            return resp(200, {"devices": [{"id": r["id"], "name": r["device_name"] or "Устройство", "createdAt": r["created_at"],
+                                           "lastActive": r["last_active"], "current": r["id"] == sid} for r in cur.fetchall()]})
+
+        if action == "device_remove":
+            did = int(body.get("deviceId") or 0)
+            if did == sid:
+                return err(400, "Чтобы выйти на этом устройстве, нажмите «Выйти»")
+            cur.execute(f"DELETE FROM {S}.push_subs WHERE session_id=%s AND user_id=%s", (did, me))
+            cur.execute(f"DELETE FROM {S}.sessions WHERE id=%s AND user_id=%s", (did, me))
+            return resp(200, {"ok": True})
+
+        if action == "link_request":
+            device_pub = str(body.get("devicePub") or "")
+            if len(device_pub) < 40 or len(device_pub) > 400:
+                return err(400, "Некорректный ключ устройства")
+            cur.execute(f"DELETE FROM {S}.device_links WHERE user_id=%s OR created_at < NOW() - INTERVAL '15 minutes'", (me,))
+            alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+            code = "".join(secrets.choice(alphabet) for _ in range(8))
+            cur.execute(
+                f"INSERT INTO {S}.device_links (code, user_id, device_pub, device_name) VALUES (%s,%s,%s,%s)",
+                (code, me, device_pub, device_label(body)),
+            )
+            return resp(200, {"code": code})
+
+        if action == "link_lookup":
+            code = "".join(ch for ch in str(body.get("code") or "").upper() if ch.isalnum())
+            cur.execute(
+                f"""SELECT device_pub, device_name FROM {S}.device_links WHERE code=%s AND user_id=%s
+                AND payload IS NULL AND created_at > NOW() - INTERVAL '15 minutes'""",
+                (code, me),
+            )
+            r = cur.fetchone()
+            if not r:
+                return err(404, "Код не найден или устарел. Проверьте, что на обоих устройствах один и тот же аккаунт")
+            return resp(200, {"devicePub": r["device_pub"], "deviceName": r["device_name"]})
+
+        if action == "link_approve":
+            code = "".join(ch for ch in str(body.get("code") or "").upper() if ch.isalnum())
+            payload = str(body.get("payload") or "")
+            if not payload or len(payload) > 200000:
+                return err(400, "Некорректные данные")
+            cur.execute(
+                f"""UPDATE {S}.device_links SET payload=%s WHERE code=%s AND user_id=%s AND payload IS NULL
+                AND created_at > NOW() - INTERVAL '15 minutes' RETURNING code""",
+                (payload, code, me),
+            )
+            if not cur.fetchone():
+                return err(404, "Код устарел — запросите новый на подключаемом устройстве")
+            return resp(200, {"ok": True})
+
+        if action == "link_poll":
+            code = "".join(ch for ch in str(body.get("code") or "").upper() if ch.isalnum())
+            cur.execute(f"SELECT payload FROM {S}.device_links WHERE code=%s AND user_id=%s", (code, me))
+            r = cur.fetchone()
+            if not r:
+                return resp(200, {"status": "expired"})
+            if not r["payload"]:
+                return resp(200, {"status": "waiting"})
+            cur.execute(f"DELETE FROM {S}.device_links WHERE code=%s", (code,))
+            return resp(200, {"status": "ready", "payload": r["payload"]})
+
+        if action == "avatar_set":
+            raw = str(body.get("image") or "")
+            icon = str(body.get("icon") or "")
+            if icon:
+                if not icon.startswith("icon:") or len(icon) > 60:
+                    return err(400, "Некорректная иконка")
+                cur.execute(f"UPDATE {S}.users SET avatar=%s WHERE id=%s", (icon, me))
+            elif raw:
+                if len(raw) > 700000:
+                    return err(400, "Фото слишком большое")
+                key = f"avatars/{me}-{uuid.uuid4().hex[:10]}.jpg"
+                s3 = boto3.client("s3", endpoint_url="https://bucket.poehali.dev",
+                                  aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                                  aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"])
+                s3.put_object(Bucket="files", Key=key, Body=base64.b64decode(raw), ContentType="image/jpeg")
+                url = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"
+                cur.execute(f"UPDATE {S}.users SET avatar=%s WHERE id=%s", (url, me))
+            else:
+                cur.execute(f"UPDATE {S}.users SET avatar=NULL WHERE id=%s", (me,))
+            cur.execute(f"SELECT {USER_COLS} FROM {S}.users u WHERE u.id=%s", (me,))
+            return resp(200, {"user": user_out(cur.fetchone())})
 
         if action == "me":
             cur.execute(f"SELECT {USER_COLS} FROM {S}.users u WHERE u.id=%s", (me,))
@@ -223,9 +343,10 @@ def handler(event: dict, context) -> dict:
             if not endpoint.startswith("https://") or not keys.get("p256dh") or not keys.get("auth"):
                 return err(400, "Некорректная подписка")
             cur.execute(
-                f"""INSERT INTO {S}.push_subs (user_id, endpoint, p256dh, auth) VALUES (%s,%s,%s,%s)
-                ON CONFLICT (endpoint) DO UPDATE SET user_id=EXCLUDED.user_id, p256dh=EXCLUDED.p256dh, auth=EXCLUDED.auth""",
-                (me, endpoint, keys["p256dh"], keys["auth"]),
+                f"""INSERT INTO {S}.push_subs (user_id, endpoint, p256dh, auth, session_id) VALUES (%s,%s,%s,%s,%s)
+                ON CONFLICT (endpoint) DO UPDATE SET user_id=EXCLUDED.user_id, p256dh=EXCLUDED.p256dh, auth=EXCLUDED.auth,
+                session_id=EXCLUDED.session_id""",
+                (me, endpoint, keys["p256dh"], keys["auth"], sid),
             )
             return resp(200, {"ok": True})
 
@@ -290,6 +411,7 @@ def handler(event: dict, context) -> dict:
             return resp(200, {"user": user_out(cur.fetchone())})
 
         if action == "logout":
+            cur.execute(f"DELETE FROM {S}.push_subs WHERE session_id=%s", (sid,))
             cur.execute(f"DELETE FROM {S}.sessions WHERE token=%s", (th(token),))
             return resp(200, {"ok": True})
 
@@ -351,9 +473,9 @@ def handler(event: dict, context) -> dict:
                 return err(403, "Нет доступа к чату")
             ensure_contact(cur, peer, me)
             cur.execute(
-                f"""INSERT INTO {S}.messages (chat_id, sender_id, text, cipher, iv, sender_key, read_at)
-                VALUES (%s,%s,'',%s,%s,%s, CASE WHEN %s THEN NOW() ELSE NULL END) RETURNING id, created_at""",
-                (chat_id, me, cipher, iv, sender_key, bool(body.get("silent"))),
+                f"""INSERT INTO {S}.messages (chat_id, sender_id, text, cipher, iv, sender_key, read_at, sender_session)
+                VALUES (%s,%s,'',%s,%s,%s, CASE WHEN %s THEN NOW() ELSE NULL END, %s) RETURNING id, created_at""",
+                (chat_id, me, cipher, iv, sender_key, bool(body.get("silent")), sid),
             )
             r = cur.fetchone()
             cur.execute(f"SELECT name FROM {S}.users WHERE id=%s", (me,))
@@ -371,13 +493,19 @@ def handler(event: dict, context) -> dict:
 
         if action == "poll":
             ack = [int(x) for x in (body.get("ack") or [])[:500] if str(x).isdigit()]
+            cursor = s["msg_cursor"]
+            new_cursor = int(body.get("cursor") or 0)
             if ack:
                 cur.execute(
-                    f"""UPDATE {S}.messages m SET cipher=NULL, iv=NULL, sender_key=NULL, delivered_at=NOW()
+                    f"""UPDATE {S}.messages m SET delivered_at=NOW()
                     FROM {S}.chats c WHERE c.id=m.chat_id AND (c.user_a=%s OR c.user_b=%s)
-                    AND m.sender_id<>%s AND m.id = ANY(%s)""",
+                    AND m.sender_id<>%s AND m.id = ANY(%s) AND m.delivered_at IS NULL""",
                     (me, me, me, ack),
                 )
+            if new_cursor > cursor:
+                cursor = min(new_cursor, max_msg_id(cur, me))
+                cur.execute(f"UPDATE {S}.sessions SET msg_cursor=%s WHERE id=%s", (cursor, sid))
+                purge_delivered(cur, me)
             read_chat = int(body.get("readChat") or 0)
             gchat.mark_read(cur, S, me, -read_chat if read_chat < 0 else 0)
             if read_chat > 0 and chat_access(cur, me, read_chat):
@@ -387,7 +515,7 @@ def handler(event: dict, context) -> dict:
                     (read_chat, me),
                 )
             return resp(200, {"chats": list_chats(cur, me), "groups": gchat.list_groups(cur, S, me, ONLINE_SECONDS),
-                              "inbox": inbox(cur, me), "incoming": incoming_call(cur, me),
+                              "inbox": inbox(cur, me, sid, cursor), "cursor": cursor, "incoming": incoming_call(cur, me),
                               "incomingGroup": group.incoming_group(cur, S, me)})
 
         if action == "file_put":

@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 import { api, type User } from "@/lib/messenger-data";
 import { LOGO_URL } from "./AppHeader";
 import { cn } from "@/lib/utils";
+import { deviceName } from "@/lib/appearance";
 
 type Props = { onAuth: (token: string, user: User) => void };
 
@@ -19,7 +20,7 @@ export default function AuthScreen({ onAuth }: Props) {
     setError("");
     setLoading(true);
     try {
-      const data = await api<{ token: string; user: User }>(mode, { phone, name, password });
+      const data = await api<{ token: string; user: User }>(mode, { phone, name, password, deviceName: deviceName() });
       onAuth(data.token, data.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");

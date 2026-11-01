@@ -36,6 +36,7 @@ type Props = {
   onCall: (kind: CallKind) => void;
   onBack?: () => void;
   className?: string;
+  wallpaper?: string;
 };
 
 type Parsed = { msg: Message; p: Payload; author: number };
@@ -58,6 +59,7 @@ export default function ActiveChat({
   onCall,
   onBack,
   className,
+  wallpaper,
 }: Props) {
   const [text, setText] = useState("");
   const [code, setCode] = useState<string[] | null>(null);
@@ -151,9 +153,12 @@ export default function ActiveChat({
             </p>
           </button>
         ) : (
-          <div className="min-w-0">
-            <h1 className="hero-title truncate">{peer.name}</h1>
-            <p className={cn("mt-2 truncate", peer.online ? "text-online" : "text-muted-foreground")}>{presence(peer)}</p>
+          <div className="flex min-w-0 items-center gap-3">
+            {peer.avatar && <UserAvatar user={peer} size={56} hideOnline className="hidden sm:grid" />}
+            <div className="min-w-0">
+              <h1 className="hero-title truncate">{peer.name}</h1>
+              <p className={cn("mt-2 truncate", peer.online ? "text-online" : "text-muted-foreground")}>{presence(peer)}</p>
+            </div>
           </div>
         )}
         <div className="col-span-2 flex flex-row items-start gap-2 sm:col-span-1 sm:flex-col">
@@ -176,6 +181,7 @@ export default function ActiveChat({
       <div
         ref={scrollRef}
         className="scroll-thin flex min-h-0 flex-col gap-2 overflow-y-auto rounded-[14px] bg-card px-4 py-[22px] sm:px-6"
+        style={wallpaper ? { background: wallpaper } : undefined}
       >
         <button
           type="button"
@@ -219,7 +225,10 @@ export default function ActiveChat({
               {group && !m.mine && (
                 <span className="w-8 shrink-0 self-end">
                   {visible[i + 1]?.author !== author && (
-                    <UserAvatar user={{ id: author, name: names[author] ?? "?" }} size={32} />
+                    <UserAvatar
+                      user={{ id: author, name: names[author] ?? "?", avatar: group.members.find((x) => x.id === author)?.avatar }}
+                      size={32}
+                    />
                   )}
                 </span>
               )}
@@ -227,7 +236,7 @@ export default function ActiveChat({
                 className={cn(
                   "min-w-0 animate-msg-in whitespace-pre-wrap break-words rounded-2xl leading-[1.4]",
                   wide ? "p-2.5" : "px-3.5 py-2.5",
-                  m.mine ? "bg-accent text-accent-foreground" : "bg-background",
+                  m.mine ? "bubble-mine" : "bubble-peer",
                   m.id < 0 && "opacity-70",
                 )}
               >

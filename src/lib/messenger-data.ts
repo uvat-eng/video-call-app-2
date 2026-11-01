@@ -14,6 +14,7 @@ export type User = {
   lastSeen?: string;
   online: boolean;
   publicKey?: string | null;
+  avatar?: string | null;
 };
 
 export type GroupMemberInfo = User & { admin: boolean };
@@ -56,6 +57,7 @@ export function groupPeer(g: GroupInfo): User {
 export type InboxItem = {
   id: number;
   chatId: number;
+  mine?: boolean;
   cipher: string;
   iv: string;
   senderKey: string;

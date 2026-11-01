@@ -19,9 +19,15 @@ import {
 import { encodePayload, isSilentText, previewText, type Payload } from "@/lib/payload";
 import { compressImage, uploadEncrypted } from "@/lib/files";
 import GroupCreate from "./GroupCreate";
+import LinkScreen from "./LinkScreen";
+import { applyLook, loadLook, saveLook, wallpaperCss, type Look } from "@/lib/appearance";
 import {
   groupDecrypt,
   groupEncrypt,
+  exportIdentity,
+  importIdentity,
+  sealLinkBundle,
+  type LinkBundle,
   loadIdentity,
   newGroupKey,
   Vault,
@@ -55,6 +61,7 @@ import {
 } from "@/lib/biometric";
 
 type PollResult = {
+  cursor: number;
   chats: ChatItem[];
   groups: ChatItem[];
   inbox: InboxItem[];
@@ -102,6 +109,16 @@ export default function Messenger() {
   }, []);
 
   const [pending, setPendingE2e] = useState<E2E | null>(null);
+  const [needLink, setNeedLink] = useState(false);
+  const [vaultTick, setVaultTick] = useState(0);
+
+  useEffect(() => {
+    applyLook(loadLook());
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyLook(loadLook());
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
   const unlockedKey = (id: number) => `rusapp_unlocked_${id}`;
 
   const publish = async (id: E2E, user: User, t: string) => {
@@ -126,6 +143,7 @@ export default function Messenger() {
     vaultKind(me.id)
       .then(async (kind) => {
         if (kind === "pin") return setVaultMode("unlock");
+        if (kind === "none" && me.publicKey && sessionStorage.getItem("rusapp_fresh") !== "1") return setNeedLink(true);
         const id = await loadIdentity(await Vault.openDevice(me.id));
         await publish(id, me, token);
         const locked = await id.vault.hasLock();
@@ -137,7 +155,7 @@ export default function Messenger() {
         setVaultMode(locked ? "unlock" : "create");
       })
       .catch(() => setVaultError("Не удалось подготовить защищённое хранилище на этом устройстве"));
-  }, [me?.id, token, e2e]);
+  }, [me?.id, token, e2e, vaultTick]);
 
   const onAuth = (t: string, u: User) => {
     localStorage.setItem(TOKEN_KEY, t);
@@ -165,6 +183,7 @@ export default function Messenger() {
       return null;
     });
     setPendingE2e(null);
+    setNeedLink(false);
     setVaultMode(null);
     setToken(null);
     setMe(null);
@@ -202,6 +221,23 @@ export default function Messenger() {
     }
   };
 
+  const finishLink = async (bundle: LinkBundle) => {
+    if (!me || !token) return;
+    const vault = await Vault.openDevice(me.id, true);
+    await importIdentity(vault, bundle.identity as Parameters<typeof importIdentity>[1]);
+    if (bundle.history) await vault.set("history", bundle.history);
+    if (bundle.groupKeys) await vault.set("groupKeys", bundle.groupKeys);
+    vault.close();
+    setNeedLink(false);
+    setVaultTick((t) => t + 1);
+  };
+
+  const startFresh = () => {
+    sessionStorage.setItem("rusapp_fresh", "1");
+    setNeedLink(false);
+    setVaultTick((t) => t + 1);
+  };
+
   const resetVault = async () => {
     if (!me) return;
     pending?.vault.close();
@@ -209,12 +245,14 @@ export default function Messenger() {
     await wipeVault(me.id);
     setVaultMode(null);
     setE2e(null);
-    setMe({ ...me });
+    setVaultTick((t) => t + 1);
   };
 
   if (!ready) return <Loader />;
   if (!token || !me) return <AuthScreen onAuth={onAuth} />;
   if (!e2e) {
+    if (needLink)
+      return <LinkScreen token={token} name={me.name} onLinked={finishLink} onFresh={startFresh} onLogout={logout} />;
     if (vaultError)
       return (
         <div className="grid h-[100dvh] place-items-center bg-background p-6 text-center text-muted-foreground">
@@ -302,6 +340,7 @@ function MessengerApp({
   const seenCalls = useRef<Set<number>>(new Set());
   const pollingRef = useRef(false);
   const ackRef = useRef<number[]>([]);
+  const cursorRef = useRef(0);
   const groupKeys = useRef<Map<number, string>>(new Map());
   const syncingGroups = useRef<Set<number>>(new Set());
   const sharing = useRef<Set<string>>(new Set());
@@ -520,26 +559,36 @@ function MessengerApp({
 
     const readChat = !document.hidden ? (activeRef.current ?? 0) : 0;
     try {
-      const res = await api<PollResult>("poll", { ack, readChat }, token);
+      const res = await api<PollResult>("poll", { ack, readChat, cursor: cursorRef.current }, token);
+      if (res.cursor > cursorRef.current) cursorRef.current = res.cursor;
       const groups = (res.groups ?? []).map((g) => ({ ...g, peer: groupPeer(g.group!) }));
       setServerChats([...res.chats, ...groups]);
       setChatsLoaded(true);
       flushOutbox(res.chats);
       syncGroups((res.groups ?? []).map((g) => g.group!));
       const received: { chatId: number; msg: Message }[] = [];
+      let maxId = cursorRef.current;
       for (const item of res.inbox) {
+        maxId = Math.max(maxId, item.id);
         let text: string;
         try {
-          text = await e2e.decrypt(item.senderKey, item.cipher, item.iv);
+          const peerKey = item.mine ? res.chats.find((c) => c.id === item.chatId)?.peer.publicKey : item.senderKey;
+          if (!peerKey) throw new Error();
+          text = await e2e.decrypt(peerKey, item.cipher, item.iv);
         } catch {
           text = "Не удалось расшифровать сообщение: собеседник сменил устройство или ключ";
+        }
+        if (item.mine) {
+          received.push({ chatId: item.chatId, msg: { id: item.id, mine: true, text, at: item.at, read: false } });
+          continue;
         }
         received.push({ chatId: item.chatId, msg: { id: item.id, mine: false, text, at: item.at, read: true } });
       }
       if (received.length) {
         await appendMessages(received);
-        ackRef.current.push(...received.map((r) => r.msg.id));
+        ackRef.current.push(...received.filter((r) => !r.msg.mine).map((r) => r.msg.id));
       }
+      cursorRef.current = maxId;
       const inc = res.incoming;
       const ig = res.incomingGroup;
       if (ig && !callRef.current && !groupRef.current && !seenGroups.current.has(ig.id)) {
@@ -966,6 +1015,56 @@ function MessengerApp({
     }
   };
 
+  const [look, setLook] = useState<Look>(() => loadLook());
+  const [wallpaper, setWallpaper] = useState("");
+
+  useEffect(() => {
+    setWallpaper(wallpaperCss(look));
+  }, [look]);
+
+  const changeLook = (next: Look) => {
+    saveLook(next);
+    applyLook(next);
+    setLook(next);
+  };
+
+  const saveAvatar = async (body: { image?: string; icon?: string }) => {
+    try {
+      const r = await api<{ user: User }>("avatar_set", body, token);
+      setMe({ ...me, ...r.user });
+      return null;
+    } catch (e) {
+      handleAuthError(e);
+      return e instanceof Error ? e.message : "Не удалось сохранить";
+    }
+  };
+
+  const approveDevice = async (code: string) => {
+    try {
+      const r = await api<{ devicePub: string; deviceName: string }>("link_lookup", { code }, token);
+      const identity = await exportIdentity(e2e.vault);
+      if (!identity) return "Ключи на этом устройстве не найдены";
+      await saveChain.current;
+      const payload = await sealLinkBundle(r.devicePub, {
+        identity,
+        history: historyRef.current,
+        groupKeys: Object.fromEntries(groupKeys.current),
+      });
+      if (payload.length > 200000) {
+        const trimmed: History = {};
+        for (const [k, v] of Object.entries(historyRef.current)) trimmed[Number(k)] = v.slice(-150);
+        const small = await sealLinkBundle(r.devicePub, { identity, history: trimmed });
+        await api("link_approve", { code, payload: small }, token);
+      } else {
+        await api("link_approve", { code, payload }, token);
+      }
+      return null;
+    } catch (e) {
+      handleAuthError(e);
+      return e instanceof Error ? e.message : "Не удалось подключить устройство";
+    }
+  };
+
   const saveProfile = async (name: string, status: string) => {
     try {
       const r = await api<{ user: User }>("update_profile", { name, status }, token);
@@ -1037,6 +1136,7 @@ function MessengerApp({
             {active ? (
               <ActiveChat
                 key={active.id}
+                wallpaper={wallpaper}
                 peer={active.peer}
                 group={active.group}
                 me={me}
@@ -1105,6 +1205,11 @@ function MessengerApp({
         {tab === "settings" && (
           <SettingsView
             user={me}
+            token={token}
+            onAvatar={saveAvatar}
+            onApproveDevice={approveDevice}
+            look={look}
+            onLook={changeLook}
             onSave={saveProfile}
             onLogout={onLogout}
             onClearHistory={clearHistory}

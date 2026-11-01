@@ -110,17 +110,26 @@
 
 @layer components {
   .app-text {
-    font-size: 15px;
+    font-size: calc(15px * var(--app-scale, 1));
   }
   @media (min-width: 1024px) {
     .app-text {
-      font-size: 17px;
+      font-size: calc(17px * var(--app-scale, 1));
     }
   }
   @media (min-width: 1440px) {
     .app-text {
-      font-size: 19px;
+      font-size: calc(19px * var(--app-scale, 1));
     }
+  }
+
+  .bubble-mine {
+    background: var(--bubble-bg, hsl(var(--accent)));
+    color: var(--bubble-fg, hsl(var(--accent-foreground)));
+  }
+  .bubble-peer {
+    background: hsl(var(--background));
+    color: var(--chat-fg, hsl(var(--foreground)));
   }
 
   .hero-title {

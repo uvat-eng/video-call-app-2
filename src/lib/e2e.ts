@@ -268,6 +268,49 @@ export async function loadIdentity(vault: Vault): Promise<E2E> {
   };
 }
 
+export type LinkBundle = { identity: Identity; history: unknown; groupKeys?: Record<number, string> };
+
+async function deriveAes(priv: CryptoKey, peerPub: string) {
+  const peer = await crypto.subtle.importKey("raw", unb64(peerPub), CURVE, false, []);
+  const bits = await crypto.subtle.deriveBits({ name: "ECDH", public: peer }, priv, 256);
+  const hk = await crypto.subtle.importKey("raw", bits, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: enc.encode("rusapp-link-v1") },
+    hk,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+export async function linkKeypair() {
+  const pair = await crypto.subtle.generateKey(CURVE, true, ["deriveBits"]);
+  const pub = b64(await crypto.subtle.exportKey("raw", pair.publicKey));
+  return {
+    pub,
+    open: async (payload: string) => {
+      const p = JSON.parse(payload) as { k: string; iv: string; c: string };
+      const key = await deriveAes(pair.privateKey, p.k);
+      return JSON.parse(await aesDecrypt(key, p)) as LinkBundle;
+    },
+  };
+}
+
+export async function sealLinkBundle(devicePub: string, bundle: LinkBundle) {
+  const pair = await crypto.subtle.generateKey(CURVE, true, ["deriveBits"]);
+  const key = await deriveAes(pair.privateKey, devicePub);
+  const s = await aesEncrypt(key, JSON.stringify(bundle));
+  return JSON.stringify({ k: b64(await crypto.subtle.exportKey("raw", pair.publicKey)), ...s });
+}
+
+export async function exportIdentity(vault: Vault) {
+  return vault.get<Identity>("identity");
+}
+
+export async function importIdentity(vault: Vault, id: Identity) {
+  await vault.set("identity", id);
+}
+
 export async function newGroupKey() {
   const k = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
   return b64(await crypto.subtle.exportKey("raw", k));

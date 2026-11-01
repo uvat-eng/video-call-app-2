@@ -7,7 +7,7 @@ HISTORY_PAGE = 300
 
 def _members(cur, S, gid, online_seconds):
     cur.execute(
-        f"""SELECT u.id, u.name, u.phone, u.status, u.last_seen, u.public_key, m.is_admin,
+        f"""SELECT u.id, u.name, u.phone, u.status, u.last_seen, u.public_key, u.avatar, m.is_admin,
         (u.last_seen > NOW() - INTERVAL '{online_seconds} seconds') AS online
         FROM {S}.gchat_members m JOIN {S}.users u ON u.id=m.user_id
         WHERE m.gchat_id=%s AND m.active ORDER BY m.joined_at, u.id""",
@@ -16,7 +16,7 @@ def _members(cur, S, gid, online_seconds):
     return [{
         "id": r["id"], "name": r["name"], "phone": r["phone"], "status": r["status"] or "",
         "lastSeen": r["last_seen"], "online": bool(r["online"]), "publicKey": r["public_key"],
-        "admin": bool(r["is_admin"]),
+        "avatar": r["avatar"], "admin": bool(r["is_admin"]),
     } for r in cur.fetchall()]
 
 
