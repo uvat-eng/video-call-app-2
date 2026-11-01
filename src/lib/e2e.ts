@@ -268,6 +268,31 @@ export async function loadIdentity(vault: Vault): Promise<E2E> {
   };
 }
 
+export async function newGroupKey() {
+  const k = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+  return b64(await crypto.subtle.exportKey("raw", k));
+}
+
+const groupKeyCache = new Map<string, Promise<CryptoKey>>();
+
+function importGroupKey(raw: string) {
+  let k = groupKeyCache.get(raw);
+  if (!k) {
+    k = crypto.subtle.importKey("raw", unb64(raw), "AES-GCM", false, ["encrypt", "decrypt"]);
+    groupKeyCache.set(raw, k);
+  }
+  return k;
+}
+
+export async function groupEncrypt(raw: string, text: string) {
+  const s = await aesEncrypt(await importGroupKey(raw), text);
+  return { cipher: s.c, iv: s.iv };
+}
+
+export async function groupDecrypt(raw: string, cipher: string, iv: string) {
+  return aesDecrypt(await importGroupKey(raw), { iv, c: cipher });
+}
+
 export async function safetyCode(a: string, b: string) {
   const [x, y] = [a, b].sort();
   const h = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(x + "|" + y)));

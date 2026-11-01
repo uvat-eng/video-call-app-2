@@ -378,9 +378,8 @@ def handler(event: dict, context) -> dict:
                     AND m.sender_id<>%s AND m.id = ANY(%s)""",
                     (me, me, me, ack),
                 )
-            gack = [int(x) for x in (body.get("gack") or [])[:500] if str(x).isdigit()]
             read_chat = int(body.get("readChat") or 0)
-            gchat.ack(cur, S, me, gack, -read_chat if read_chat < 0 else 0)
+            gchat.mark_read(cur, S, me, -read_chat if read_chat < 0 else 0)
             if read_chat > 0 and chat_access(cur, me, read_chat):
                 cur.execute(
                     f"""UPDATE {S}.messages SET read_at=NOW() WHERE chat_id=%s AND sender_id<>%s
@@ -388,7 +387,6 @@ def handler(event: dict, context) -> dict:
                     (read_chat, me),
                 )
             return resp(200, {"chats": list_chats(cur, me), "groups": gchat.list_groups(cur, S, me, ONLINE_SECONDS),
-                              "ginbox": gchat.inbox(cur, S, me),
                               "inbox": inbox(cur, me), "incoming": incoming_call(cur, me),
                               "incomingGroup": group.incoming_group(cur, S, me)})
 

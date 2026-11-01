@@ -11,7 +11,7 @@ import {
   type IncomingGroup,
   type GroupCallRecord,
   type InboxItem,
-  type GroupInboxItem,
+  type GroupInfo,
   type Message,
   type User,
   groupPeer,
@@ -19,7 +19,16 @@ import {
 import { encodePayload, isSilentText, previewText, type Payload } from "@/lib/payload";
 import { compressImage, uploadEncrypted } from "@/lib/files";
 import GroupCreate from "./GroupCreate";
-import { loadIdentity, Vault, vaultKind, wipeVault, type E2E } from "@/lib/e2e";
+import {
+  groupDecrypt,
+  groupEncrypt,
+  loadIdentity,
+  newGroupKey,
+  Vault,
+  vaultKind,
+  wipeVault,
+  type E2E,
+} from "@/lib/e2e";
 import AppHeader, { type Tab } from "./AppHeader";
 import ChatList from "./ChatList";
 import ActiveChat from "./ActiveChat";
@@ -48,7 +57,6 @@ import {
 type PollResult = {
   chats: ChatItem[];
   groups: ChatItem[];
-  ginbox: GroupInboxItem[];
   inbox: InboxItem[];
   incoming: IncomingCall | null;
   incomingGroup: IncomingGroup | null;
@@ -294,7 +302,9 @@ function MessengerApp({
   const seenCalls = useRef<Set<number>>(new Set());
   const pollingRef = useRef(false);
   const ackRef = useRef<number[]>([]);
-  const gackRef = useRef<number[]>([]);
+  const groupKeys = useRef<Map<number, string>>(new Map());
+  const syncingGroups = useRef<Set<number>>(new Set());
+  const sharing = useRef<Set<string>>(new Set());
   const pendingChatRef = useRef<number | null>(null);
   const historyRef = useRef<History>({});
   const saveChain = useRef<Promise<void>>(Promise.resolve());
@@ -428,20 +438,94 @@ function MessengerApp({
     [onLogout],
   );
 
+  const groupKeyOf = useCallback(
+    async (g: GroupInfo) => {
+      const cached = groupKeys.current.get(g.id);
+      if (cached) return cached;
+      if (!g.key) return null;
+      try {
+        const raw = await e2e.decrypt(g.key.senderKey, g.key.cipher, g.key.iv);
+        groupKeys.current.set(g.id, raw);
+        return raw;
+      } catch {
+        return null;
+      }
+    },
+    [e2e],
+  );
+
+  const syncGroups = useCallback(
+    async (groups: GroupInfo[]) => {
+      for (const g of groups) {
+        const raw = await groupKeyOf(g);
+        if (!raw) continue;
+        const need = g.needKey.filter((id) => !sharing.current.has(`${g.id}:${id}`));
+        if (need.length) {
+          const items = [];
+          for (const id of need) {
+            const pk = g.members.find((m) => m.id === id)?.publicKey;
+            if (!pk) continue;
+            sharing.current.add(`${g.id}:${id}`);
+            const sealed = await e2e.encrypt(pk, raw);
+            items.push({ userId: id, cipher: sealed.cipher, iv: sealed.iv });
+          }
+          if (items.length)
+            api("gchat_share_key", { gchatId: g.id, senderKey: e2e.pub, items }, token).catch(() =>
+              need.forEach((id) => sharing.current.delete(`${g.id}:${id}`)),
+            );
+        }
+        const chatId = -g.id;
+        const have = (historyRef.current[chatId] ?? []).reduce((mx, m) => (m.id > mx ? m.id : mx), 0);
+        if (g.lastId <= have || syncingGroups.current.has(g.id)) continue;
+        syncingGroups.current.add(g.id);
+        try {
+          let after = have;
+          for (;;) {
+            const r = await api<{
+              messages: { id: number; from: number; cipher: string; iv: string; at: string }[];
+              more: boolean;
+            }>("gchat_history", { gchatId: g.id, after }, token);
+            const items: { chatId: number; msg: Message }[] = [];
+            for (const x of r.messages) {
+              let text: string;
+              try {
+                text = await groupDecrypt(raw, x.cipher, x.iv);
+              } catch {
+                text = "Не удалось расшифровать сообщение";
+              }
+              items.push({
+                chatId,
+                msg: { id: x.id, mine: x.from === me.id, text, at: x.at, read: true, from: x.from },
+              });
+              after = x.id;
+            }
+            if (items.length) await appendMessages(items);
+            if (!r.more) break;
+          }
+        } catch {
+          continue;
+        } finally {
+          syncingGroups.current.delete(g.id);
+        }
+      }
+    },
+    [groupKeyOf, e2e, token, appendMessages, me.id],
+  );
+
   const poll = useCallback(async () => {
     if (pollingRef.current || !historyLoaded) return;
     pollingRef.current = true;
     const ack = ackRef.current;
     ackRef.current = [];
-    const gack = gackRef.current;
-    gackRef.current = [];
+
     const readChat = !document.hidden ? (activeRef.current ?? 0) : 0;
     try {
-      const res = await api<PollResult>("poll", { ack, gack, readChat }, token);
+      const res = await api<PollResult>("poll", { ack, readChat }, token);
       const groups = (res.groups ?? []).map((g) => ({ ...g, peer: groupPeer(g.group!) }));
       setServerChats([...res.chats, ...groups]);
       setChatsLoaded(true);
       flushOutbox(res.chats);
+      syncGroups((res.groups ?? []).map((g) => g.group!));
       const received: { chatId: number; msg: Message }[] = [];
       for (const item of res.inbox) {
         let text: string;
@@ -452,23 +536,9 @@ function MessengerApp({
         }
         received.push({ chatId: item.chatId, msg: { id: item.id, mine: false, text, at: item.at, read: true } });
       }
-      const gReceived: { chatId: number; msg: Message }[] = [];
-      for (const item of res.ginbox ?? []) {
-        let text: string;
-        try {
-          text = await e2e.decrypt(item.senderKey, item.cipher, item.iv);
-        } catch {
-          text = "Не удалось расшифровать сообщение";
-        }
-        gReceived.push({
-          chatId: item.chatId,
-          msg: { id: item.id, mine: false, text, at: item.at, read: true, from: item.from },
-        });
-      }
-      if (received.length || gReceived.length) {
-        await appendMessages([...received, ...gReceived]);
+      if (received.length) {
+        await appendMessages(received);
         ackRef.current.push(...received.map((r) => r.msg.id));
-        gackRef.current.push(...gReceived.map((r) => r.msg.id));
       }
       const inc = res.incoming;
       const ig = res.incomingGroup;
@@ -482,19 +552,18 @@ function MessengerApp({
       }
     } catch (e) {
       ackRef.current.unshift(...ack);
-      gackRef.current.unshift(...gack);
       handleAuthError(e);
     } finally {
       pollingRef.current = false;
     }
-  }, [token, e2e, historyLoaded, appendMessages, handleAuthError, flushOutbox]);
+  }, [token, e2e, historyLoaded, appendMessages, handleAuthError, flushOutbox, syncGroups]);
 
   useEffect(() => {
     if (!historyLoaded) return;
     poll();
     let t: number;
     const loop = () => {
-      const delay = document.hidden ? 10000 : ackRef.current.length || gackRef.current.length ? 600 : 3000;
+      const delay = document.hidden ? 10000 : ackRef.current.length ? 600 : 3000;
       t = window.setTimeout(async () => {
         await poll();
         loop();
@@ -733,17 +802,10 @@ function MessengerApp({
       setPending((p) => ({ ...p, [chat.id]: [...(p[chat.id] ?? []), temp] }));
     }
     try {
-      const items = [];
-      for (const m of g.members) {
-        if (m.id === me.id || !m.publicKey) continue;
-        const sealed = await e2e.encrypt(m.publicKey, text);
-        items.push({ userId: m.id, cipher: sealed.cipher, iv: sealed.iv });
-      }
-      const r = await api<{ id: number; at: string }>(
-        "gchat_send",
-        { gchatId: g.id, senderKey: e2e.pub, items, silent },
-        token,
-      );
+      const raw = await groupKeyOf(g);
+      if (!raw) throw new Error("Ключ группы ещё не получен — подождите, пока кто-то из участников будет в сети");
+      const sealed = await groupEncrypt(raw, text);
+      const r = await api<{ id: number; at: string }>("gchat_send", { gchatId: g.id, ...sealed, silent }, token);
       await appendMessages([{ chatId: chat.id, msg: { id: r.id, mine: true, text, at: r.at, read: false, from: me.id } }]);
     } catch (e) {
       handleAuthError(e);
@@ -803,7 +865,20 @@ function MessengerApp({
 
   const createGroup = async (title: string, users: User[]) => {
     try {
-      const r = await api<{ chatId: number }>("gchat_create", { title, userIds: users.map((u) => u.id) }, token);
+      const raw = await newGroupKey();
+      const keys = [];
+      for (const u of [me, ...users]) {
+        const pk = u.id === me.id ? e2e.pub : u.publicKey;
+        if (!pk) continue;
+        const sealed = await e2e.encrypt(pk, raw);
+        keys.push({ userId: u.id, cipher: sealed.cipher, iv: sealed.iv });
+      }
+      const r = await api<{ chatId: number }>(
+        "gchat_create",
+        { title, userIds: users.map((u) => u.id), senderKey: e2e.pub, keys },
+        token,
+      );
+      groupKeys.current.set(-r.chatId, raw);
       setGroupCreate(false);
       pendingChatRef.current = r.chatId;
       await poll();

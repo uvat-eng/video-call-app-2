@@ -2,6 +2,7 @@ from push import send_push
 
 MAX_MEMBERS = 200
 MAX_CIPHER = 60000
+HISTORY_PAGE = 300
 
 
 def _members(cur, S, gid, online_seconds):
@@ -29,57 +30,63 @@ def _member(cur, S, gid, me):
 
 def list_groups(cur, S, me, online_seconds):
     cur.execute(
-        f"""SELECT g.id, g.title, g.created_at,
-        (SELECT MAX(x.created_at) FROM {S}.gchat_messages x WHERE x.gchat_id=g.id) AS last_at,
-        (SELECT COUNT(*) FROM {S}.gchat_deliveries d JOIN {S}.gchat_messages x ON x.id=d.message_id
-           WHERE x.gchat_id=g.id AND d.user_id=%s AND d.read_at IS NULL) AS unread,
-        (SELECT COALESCE(MAX(x.id),0) FROM {S}.gchat_messages x WHERE x.gchat_id=g.id AND x.sender_id=%s
-           AND NOT EXISTS (SELECT 1 FROM {S}.gchat_deliveries d WHERE d.message_id=x.id AND d.read_at IS NULL)) AS read_upto
-        FROM {S}.gchats g JOIN {S}.gchat_members m ON m.gchat_id=g.id AND m.user_id=%s AND m.active""",
-        (me, me, me),
+        f"""SELECT g.id, g.title, g.created_at, m.read_upto,
+        (SELECT MAX(x.created_at) FROM {S}.gchat_messages x WHERE x.gchat_id=g.id AND NOT x.silent) AS last_at,
+        (SELECT COALESCE(MAX(x.id),0) FROM {S}.gchat_messages x WHERE x.gchat_id=g.id AND x.cipher IS NOT NULL) AS last_id,
+        (SELECT COUNT(*) FROM {S}.gchat_messages x WHERE x.gchat_id=g.id AND x.id > m.read_upto
+           AND x.sender_id<>%s AND NOT x.silent AND x.cipher IS NOT NULL) AS unread,
+        (SELECT COALESCE(MIN(o.read_upto),0) FROM {S}.gchat_members o
+           WHERE o.gchat_id=g.id AND o.active AND o.user_id<>%s) AS others_read,
+        k.cipher AS k_cipher, k.iv AS k_iv, k.sender_key AS k_sender
+        FROM {S}.gchats g JOIN {S}.gchat_members m ON m.gchat_id=g.id AND m.user_id=%s AND m.active
+        LEFT JOIN {S}.gchat_keys k ON k.gchat_id=g.id AND k.user_id=%s""",
+        (me, me, me, me),
     )
+    rows = cur.fetchall()
     out = []
-    for r in cur.fetchall():
+    for r in rows:
         members = _members(cur, S, r["id"], online_seconds)
+        cur.execute(
+            f"""SELECT m.user_id FROM {S}.gchat_members m JOIN {S}.users u ON u.id=m.user_id
+            WHERE m.gchat_id=%s AND m.active AND u.public_key IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM {S}.gchat_keys k WHERE k.gchat_id=m.gchat_id AND k.user_id=m.user_id)""",
+            (r["id"],),
+        )
+        need = [x["user_id"] for x in cur.fetchall()]
         out.append({
             "id": -r["id"],
-            "group": {"id": r["id"], "title": r["title"], "members": members,
-                      "admin": any(x["id"] == me and x["admin"] for x in members)},
+            "group": {
+                "id": r["id"], "title": r["title"], "members": members,
+                "admin": any(x["id"] == me and x["admin"] for x in members),
+                "lastId": int(r["last_id"] or 0),
+                "key": {"cipher": r["k_cipher"], "iv": r["k_iv"], "senderKey": r["k_sender"]} if r["k_cipher"] else None,
+                "needKey": need,
+            },
             "lastAt": r["last_at"] or r["created_at"],
             "unread": int(r["unread"] or 0),
-            "readUpto": int(r["read_upto"] or 0),
+            "readUpto": int(r["others_read"] or 0),
         })
     return out
 
 
-def inbox(cur, S, me):
+def mark_read(cur, S, me, gid):
+    if not gid:
+        return
     cur.execute(
-        f"""SELECT x.id, x.gchat_id, x.sender_id, x.sender_key, x.created_at, d.cipher, d.iv
-        FROM {S}.gchat_deliveries d JOIN {S}.gchat_messages x ON x.id=d.message_id
-        WHERE d.user_id=%s AND d.delivered_at IS NULL AND d.cipher IS NOT NULL ORDER BY x.id LIMIT 200""",
-        (me,),
+        f"""UPDATE {S}.gchat_members SET read_upto=GREATEST(read_upto,
+            (SELECT COALESCE(MAX(id),0) FROM {S}.gchat_messages WHERE gchat_id=%s))
+        WHERE gchat_id=%s AND user_id=%s AND active""",
+        (gid, gid, me),
     )
-    return [{"id": r["id"], "chatId": -r["gchat_id"], "from": r["sender_id"], "senderKey": r["sender_key"],
-             "cipher": r["cipher"], "iv": r["iv"], "at": r["created_at"]} for r in cur.fetchall()]
-
-
-def ack(cur, S, me, ids, read_group):
-    if ids:
-        cur.execute(
-            f"""UPDATE {S}.gchat_deliveries SET cipher=NULL, iv=NULL, delivered_at=NOW()
-            WHERE user_id=%s AND message_id = ANY(%s)""",
-            (me, ids),
-        )
-    if read_group:
-        cur.execute(
-            f"""UPDATE {S}.gchat_deliveries d SET read_at=NOW() FROM {S}.gchat_messages x
-            WHERE x.id=d.message_id AND x.gchat_id=%s AND d.user_id=%s AND d.read_at IS NULL AND d.delivered_at IS NOT NULL""",
-            (read_group, me),
-        )
 
 
 def unread_total(cur, S, uid):
-    cur.execute(f"SELECT COUNT(*) AS n FROM {S}.gchat_deliveries WHERE user_id=%s AND read_at IS NULL", (uid,))
+    cur.execute(
+        f"""SELECT COUNT(*) AS n FROM {S}.gchat_messages x JOIN {S}.gchat_members m
+        ON m.gchat_id=x.gchat_id AND m.user_id=%s AND m.active
+        WHERE x.id > m.read_upto AND x.sender_id<>%s AND NOT x.silent AND x.cipher IS NOT NULL""",
+        (uid, uid),
+    )
     return int(cur.fetchone()["n"])
 
 
@@ -95,6 +102,28 @@ def _ids(raw, me):
     return out
 
 
+def _store_keys(cur, S, gid, me, sender_key, items):
+    cur.execute(f"SELECT user_id FROM {S}.gchat_members WHERE gchat_id=%s AND active", (gid,))
+    allowed = {r["user_id"] for r in cur.fetchall()}
+    n = 0
+    for it in (items or [])[:MAX_MEMBERS + 1]:
+        try:
+            uid = int(it.get("userId"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        cipher = str(it.get("cipher") or "")
+        iv = str(it.get("iv") or "")
+        if uid not in allowed or not cipher or not iv or len(cipher) > 400 or len(iv) > 32:
+            continue
+        cur.execute(
+            f"""INSERT INTO {S}.gchat_keys (gchat_id, user_id, cipher, iv, sender_key) VALUES (%s,%s,%s,%s,%s)
+            ON CONFLICT (gchat_id, user_id) DO NOTHING""",
+            (gid, uid, cipher, iv, sender_key),
+        )
+        n += 1
+    return n
+
+
 def handle(action, body, cur, S, me, resp, err, online_seconds, direct_unread):
     if action == "gchat_create":
         title = str(body.get("title") or "").strip()[:80]
@@ -103,6 +132,9 @@ def handle(action, body, cur, S, me, resp, err, online_seconds, direct_unread):
         ids = _ids(body.get("userIds"), me)
         if not ids:
             return err(400, "Добавьте хотя бы одного участника")
+        sender_key = str(body.get("senderKey") or "")
+        if not sender_key:
+            return err(400, "Нет ключа шифрования группы")
         cur.execute(f"SELECT id FROM {S}.users WHERE id = ANY(%s)", (ids,))
         valid = [r["id"] for r in cur.fetchall()]
         cur.execute(f"INSERT INTO {S}.gchats (title, owner_id) VALUES (%s,%s) RETURNING id", (title, me))
@@ -110,6 +142,7 @@ def handle(action, body, cur, S, me, resp, err, online_seconds, direct_unread):
         cur.execute(f"INSERT INTO {S}.gchat_members (gchat_id, user_id, is_admin) VALUES (%s,%s,TRUE)", (gid, me))
         for uid in valid:
             cur.execute(f"INSERT INTO {S}.gchat_members (gchat_id, user_id) VALUES (%s,%s)", (gid, uid))
+        _store_keys(cur, S, gid, me, sender_key, body.get("keys"))
         cur.execute(f"SELECT name FROM {S}.users WHERE id=%s", (me,))
         my_name = cur.fetchone()["name"]
         for uid in valid:
@@ -122,45 +155,52 @@ def handle(action, body, cur, S, me, resp, err, online_seconds, direct_unread):
     if not m:
         return err(403, "Вы не участник этой группы")
 
-    if action == "gchat_send":
+    if action == "gchat_share_key":
+        cur.execute(f"SELECT 1 FROM {S}.gchat_keys WHERE gchat_id=%s AND user_id=%s", (gid, me))
+        if not cur.fetchone():
+            return err(403, "У вас ещё нет ключа группы")
         sender_key = str(body.get("senderKey") or "")
-        items = body.get("items") or []
-        if not sender_key or not isinstance(items, list):
-            return err(400, "Сообщение должно быть зашифровано")
-        cur.execute(f"SELECT user_id FROM {S}.gchat_members WHERE gchat_id=%s AND active AND user_id<>%s", (gid, me))
-        allowed = {r["user_id"] for r in cur.fetchall()}
-        rows = []
-        for it in items[:MAX_MEMBERS]:
-            try:
-                uid = int(it.get("userId"))
-            except (TypeError, ValueError, AttributeError):
-                continue
-            cipher = str(it.get("cipher") or "")
-            iv = str(it.get("iv") or "")
-            if uid in allowed and cipher and iv and len(cipher) <= MAX_CIPHER and len(iv) <= 32:
-                rows.append((uid, cipher, iv))
+        return resp(200, {"stored": _store_keys(cur, S, gid, me, sender_key, body.get("items"))})
+
+    if action == "gchat_history":
+        after = int(body.get("after") or 0)
         cur.execute(
-            f"INSERT INTO {S}.gchat_messages (gchat_id, sender_id, sender_key) VALUES (%s,%s,%s) RETURNING id, created_at",
-            (gid, me, sender_key),
+            f"""SELECT id, sender_id, cipher, iv, created_at FROM {S}.gchat_messages
+            WHERE gchat_id=%s AND id > %s AND cipher IS NOT NULL ORDER BY id LIMIT {HISTORY_PAGE}""",
+            (gid, after),
+        )
+        rows = cur.fetchall()
+        return resp(200, {
+            "messages": [{"id": r["id"], "from": r["sender_id"], "cipher": r["cipher"], "iv": r["iv"],
+                          "at": r["created_at"]} for r in rows],
+            "more": len(rows) == HISTORY_PAGE,
+        })
+
+    if action == "gchat_send":
+        cipher = str(body.get("cipher") or "")
+        iv = str(body.get("iv") or "")
+        if not cipher or not iv or len(cipher) > MAX_CIPHER or len(iv) > 32:
+            return err(400, "Сообщение должно быть зашифровано")
+        silent = bool(body.get("silent"))
+        cur.execute(
+            f"""INSERT INTO {S}.gchat_messages (gchat_id, sender_id, cipher, iv, silent)
+            VALUES (%s,%s,%s,%s,%s) RETURNING id, created_at""",
+            (gid, me, cipher, iv, silent),
         )
         msg = cur.fetchone()
-        silent = bool(body.get("silent"))
-        for uid, cipher, iv in rows:
-            cur.execute(
-                f"""INSERT INTO {S}.gchat_deliveries (message_id, user_id, cipher, iv, read_at)
-                VALUES (%s,%s,%s,%s, CASE WHEN %s THEN NOW() ELSE NULL END)""",
-                (msg["id"], uid, cipher, iv, silent),
-            )
+        cur.execute(f"UPDATE {S}.gchat_members SET read_upto=%s WHERE gchat_id=%s AND user_id=%s", (msg["id"], gid, me))
         if not silent:
             cur.execute(f"SELECT name FROM {S}.users WHERE id=%s", (me,))
             my_name = cur.fetchone()["name"]
             cur.execute(f"SELECT title FROM {S}.gchats WHERE id=%s", (gid,))
             title = cur.fetchone()["title"]
-            for uid, _, _ in rows:
+            cur.execute(f"SELECT user_id FROM {S}.gchat_members WHERE gchat_id=%s AND active AND user_id<>%s", (gid, me))
+            for r in cur.fetchall():
+                uid = r["user_id"]
                 badge = unread_total(cur, S, uid) + direct_unread(uid)
                 send_push(cur, S, uid, {"type": "message", "chatId": -gid, "badge": badge, "title": title,
                                         "body": f"{my_name}: новое сообщение"}, ttl=86400, urgency="high")
-        return resp(200, {"id": msg["id"], "at": msg["created_at"], "delivered": len(rows)})
+        return resp(200, {"id": msg["id"], "at": msg["created_at"]})
 
     if action == "gchat_add":
         if not m["is_admin"]:
@@ -174,7 +214,7 @@ def handle(action, body, cur, S, me, resp, err, online_seconds, direct_unread):
         for uid in ids:
             cur.execute(
                 f"""INSERT INTO {S}.gchat_members (gchat_id, user_id) VALUES (%s,%s)
-                ON CONFLICT (gchat_id, user_id) DO UPDATE SET active=TRUE, joined_at=NOW()""",
+                ON CONFLICT (gchat_id, user_id) DO UPDATE SET active=TRUE, joined_at=NOW(), read_upto=0""",
                 (gid, uid),
             )
             send_push(cur, S, uid, {"type": "message", "chatId": -gid, "title": title,
@@ -186,6 +226,7 @@ def handle(action, body, cur, S, me, resp, err, online_seconds, direct_unread):
         if not m["is_admin"] or uid == me:
             return err(403, "Удалять участников может только администратор")
         cur.execute(f"UPDATE {S}.gchat_members SET active=FALSE WHERE gchat_id=%s AND user_id=%s", (gid, uid))
+        cur.execute(f"DELETE FROM {S}.gchat_keys WHERE gchat_id=%s AND user_id=%s", (gid, uid))
         return resp(200, {"members": _members(cur, S, gid, online_seconds)})
 
     if action == "gchat_rename":
@@ -197,11 +238,7 @@ def handle(action, body, cur, S, me, resp, err, online_seconds, direct_unread):
 
     if action == "gchat_leave":
         cur.execute(f"UPDATE {S}.gchat_members SET active=FALSE WHERE gchat_id=%s AND user_id=%s", (gid, me))
-        cur.execute(
-            f"UPDATE {S}.gchat_deliveries d SET cipher=NULL, iv=NULL, read_at=COALESCE(read_at, NOW()), delivered_at=COALESCE(delivered_at, NOW()) "
-            f"FROM {S}.gchat_messages x WHERE x.id=d.message_id AND x.gchat_id=%s AND d.user_id=%s",
-            (gid, me),
-        )
+        cur.execute(f"DELETE FROM {S}.gchat_keys WHERE gchat_id=%s AND user_id=%s", (gid, me))
         if m["is_admin"]:
             cur.execute(f"SELECT COUNT(*) AS n FROM {S}.gchat_members WHERE gchat_id=%s AND active AND is_admin", (gid,))
             if cur.fetchone()["n"] == 0:

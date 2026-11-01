@@ -18,7 +18,15 @@ export type User = {
 
 export type GroupMemberInfo = User & { admin: boolean };
 
-export type GroupInfo = { id: number; title: string; members: GroupMemberInfo[]; admin: boolean };
+export type GroupInfo = {
+  id: number;
+  title: string;
+  members: GroupMemberInfo[];
+  admin: boolean;
+  lastId: number;
+  key: { cipher: string; iv: string; senderKey: string } | null;
+  needKey: number[];
+};
 
 export type ChatItem = {
   id: number;
