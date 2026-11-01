@@ -231,7 +231,7 @@ export default function CallScreen({ call, token, e2e, onClose }: Props) {
         if (cancelled) return;
         const fresh = await api<{ publicKey: string | null }>("peer_key", { userId: call.peer.id }, token);
         if (fresh.publicKey) call.peer.publicKey = fresh.publicKey;
-        if (!call.peer.publicKey) return finish(`${call.peer.name} ещё не заходил(а) в RusAPP`, false);
+        if (!call.peer.publicKey) return finish(`${call.peer.name} ещё не заходил(а) в RuChat`, false);
         const offer = await e2e.seal(call.peer.publicKey, JSON.stringify(pc.localDescription));
         const res = await api<{ callId: number }>(
           "call_start",
@@ -438,7 +438,7 @@ export default function CallScreen({ call, token, e2e, onClose }: Props) {
         <div className="relative z-10 flex items-center justify-between p-5 lg:p-7">
           <div className="flex items-center gap-2 font-head font-semibold">
             <Icon name={isVideo ? "Video" : "Phone"} size={18} />
-            RusAPP · {isVideo ? "Видео" : "Аудио"}
+            RuChat · {isVideo ? "Видео" : "Аудио"}
           </div>
           <span
             className={cn(

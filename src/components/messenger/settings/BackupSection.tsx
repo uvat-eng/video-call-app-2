@@ -150,10 +150,10 @@ export default function BackupSection({ stats, onDownloadAll, onCreate, onRestor
           Восстановить из копии
         </div>
         <p className="mt-1 text-[.85em] text-muted-foreground">
-          Выберите файл .rusapp и введите его пароль. Сообщения из копии добавятся к текущей переписке, ничего не
+          Выберите файл .ruchat и введите его пароль. Сообщения из копии добавятся к текущей переписке, ничего не
           удалится.
         </p>
-        <input ref={fileRef} type="file" accept=".rusapp,application/octet-stream" hidden onChange={pick} />
+        <input ref={fileRef} type="file" accept=".ruchat,.rusapp,application/octet-stream" hidden onChange={pick} />
         <button
           type="button"
           onClick={() => fileRef.current?.click()}

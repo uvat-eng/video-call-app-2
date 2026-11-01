@@ -34,7 +34,7 @@ function addToCalendar(e: EventPayload) {
   const ics = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//RusAPP//RU",
+    "PRODID:-//RuChat//RU",
     "BEGIN:VEVENT",
     `UID:${e.id}@rusapp`,
     `DTSTAMP:${icsDate(new Date())}`,

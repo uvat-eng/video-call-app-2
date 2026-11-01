@@ -87,7 +87,7 @@ export default function GroupCreate({ contacts, onCancel, onCreate }: Props) {
                 <div className="min-w-0">
                   <div className="truncate font-medium">{c.name}</div>
                   <div className="truncate text-[.85em] text-muted-foreground">
-                    {c.publicKey ? c.phone : "получит сообщения, когда зайдёт в RusAPP"}
+                    {c.publicKey ? c.phone : "получит сообщения, когда зайдёт в RuChat"}
                   </div>
                 </div>
                 <span

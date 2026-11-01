@@ -82,7 +82,7 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd, book,
         <PhonebookPanel book={book} syncing={syncing} onSync={onSync} onMessage={onMessage} onCall={onCall} />
         <form onSubmit={add} className="rounded-[14px] bg-gradient-to-br from-tile-a to-tile-b p-5 md:col-span-2 lg:p-6">
           <div className="font-head text-[1.1em] font-semibold">Добавить контакт</div>
-          <p className="mb-3 text-[.85em] text-muted-foreground">Человек должен быть зарегистрирован в RusAPP</p>
+          <p className="mb-3 text-[.85em] text-muted-foreground">Человек должен быть зарегистрирован в RuChat</p>
           <div className="flex flex-wrap gap-2">
             <input
               value={phone}

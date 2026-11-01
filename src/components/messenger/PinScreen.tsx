@@ -58,7 +58,7 @@ export default function PinScreen({ mode, name, onSubmit, onReset, onLogout, onB
       <form onSubmit={submit} className="flex w-full max-w-[420px] flex-col gap-3 rounded-[14px] bg-card p-7">
         <div className="mb-2 flex items-center justify-between">
           <span className="rounded-lg bg-logo-bg px-1 py-0.5">
-            <img src={LOGO_URL} alt="RusAPP" className="h-8 w-auto" />
+            <img src={LOGO_URL} alt="RuChat" className="h-8 w-auto" />
           </span>
           <span className="flex items-center gap-1.5 rounded-full bg-gradient-to-br from-tile-a to-tile-b px-3 py-1 text-[.8em] font-medium">
             <Icon name="ShieldCheck" size={14} />
@@ -70,8 +70,8 @@ export default function PinScreen({ mode, name, onSubmit, onReset, onLogout, onB
         </h1>
         <p className="text-[.9em] text-muted-foreground">
           {mode === "create"
-            ? "Придумайте код для входа в приложение. Его спросят только после полного закрытия RusAPP — пока приложение открыто или свёрнуто, вводить его не нужно."
-            : "Введите код доступа. Пока RusAPP открыт или свёрнут, повторно его не спросят."}
+            ? "Придумайте код для входа в приложение. Его спросят только после полного закрытия RuChat — пока приложение открыто или свёрнуто, вводить его не нужно."
+            : "Введите код доступа. Пока RuChat открыт или свёрнут, повторно его не спросят."}
         </p>
         <input
           value={pin}

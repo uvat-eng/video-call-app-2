@@ -145,7 +145,7 @@ self.addEventListener("push", (event) => {
   try {
     data = event.data ? event.data.json() : {};
   } catch (e) {
-    data = { title: "RusAPP", body: event.data ? event.data.text() : "" };
+    data = { title: "RuChat", body: event.data ? event.data.text() : "" };
   }
   event.waitUntil(
     (async () => {
@@ -164,7 +164,7 @@ self.addEventListener("push", (event) => {
           sent = 0;
         }
         await notifyClients({ type: "vault-changed" });
-        await self.registration.showNotification(data.title || "RusAPP", {
+        await self.registration.showNotification(data.title || "RuChat", {
           body: sent ? "Отправлено сообщений: " + sent : data.body || "",
           icon: "/icon-192.png",
           badge: "/badge-96.png",
@@ -197,7 +197,7 @@ self.addEventListener("push", (event) => {
           { action: "decline", title: "Отклонить" },
         ];
       }
-      await self.registration.showNotification(data.title || "RusAPP", options);
+      await self.registration.showNotification(data.title || "RuChat", options);
     })(),
   );
 });

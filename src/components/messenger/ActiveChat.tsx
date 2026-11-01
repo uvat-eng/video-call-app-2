@@ -194,7 +194,7 @@ export default function ActiveChat({
               ? "Сообщения, фото и файлы в группе зашифрованы ключом, который есть только у участников. Сервер хранит их лишь в зашифрованном виде, чтобы новые участники видели историю, — прочитать их он не может."
               : peer.publicKey
                 ? "Сообщения, фото, файлы и звонки защищены сквозным шифрованием. Сервер не хранит переписку. Нажмите, чтобы сверить код безопасности."
-                : `Шифрование включено всегда. ${peer.name} ещё не заходил(а) в RusAPP — сообщения зашифруются и уйдут, как только собеседник откроет приложение.`}
+                : `Шифрование включено всегда. ${peer.name} ещё не заходил(а) в RuChat — сообщения зашифруются и уйдут, как только собеседник откроет приложение.`}
             {showCode && code && (
               <span className="mt-2 grid grid-cols-3 gap-x-3 gap-y-1 font-head text-[1.15em] font-semibold tabular-nums tracking-wider">
                 {code.map((g, i) => (
@@ -284,7 +284,7 @@ export default function ActiveChat({
         {!error && !group && !peer.publicKey && messages.some((m) => m.mine && m.id < 0) && (
           <p className="flex w-full items-center gap-1.5 px-3 pt-1 text-[.85em] text-muted-foreground">
             <Icon name="Clock" size={14} />
-            Сообщения зашифруются и уйдут автоматически, как только {peer.name} откроет RusAPP
+            Сообщения зашифруются и уйдут автоматически, как только {peer.name} откроет RuChat
           </p>
         )}
         {menu && (

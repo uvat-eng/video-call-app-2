@@ -78,9 +78,9 @@ export async function createBackup(
 export async function readBackupHeader(file: Blob) {
   const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
   const len = new DataView(head.buffer).getUint32(0);
-  if (len > 4096) throw new Error("Это не файл резервной копии RusAPP");
+  if (len > 4096) throw new Error("Это не файл резервной копии RuChat");
   const header = JSON.parse(dec.decode(await file.slice(4, 4 + len).arrayBuffer())) as Header;
-  if (header.magic !== MAGIC) throw new Error("Это не файл резервной копии RusAPP");
+  if (header.magic !== MAGIC) throw new Error("Это не файл резервной копии RuChat");
   return { header, offset: 4 + len };
 }
 
@@ -110,12 +110,12 @@ export async function restoreBackup(file: Blob, userId: number, password: string
 export async function saveBackupFile(blob: Blob) {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
-  const name = `RusAPP-копия-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}.rusapp`;
+  const name = `RuChat-копия-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}.ruchat`;
   const file = new File([blob], name, { type: "application/octet-stream" });
   const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
   if (/android|iphone|ipad/i.test(navigator.userAgent) && nav.canShare?.({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: "Резервная копия RusAPP" });
+      await navigator.share({ files: [file], title: "Резервная копия RuChat" });
       return "shared";
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return "cancelled";

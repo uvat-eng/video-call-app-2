@@ -13,7 +13,7 @@ type Props = {
   onCall: (u: User, kind: CallKind) => void;
 };
 
-const INVITE_TEXT = "Давай общаться в RusAPP — защищённые сообщения и видеозвонки: ";
+const INVITE_TEXT = "Давай общаться в RuChat — защищённые сообщения и видеозвонки: ";
 
 export default function PhonebookPanel({ book, syncing, onSync, onMessage, onCall }: Props) {
   const [picker, setPicker] = useState(false);
@@ -52,7 +52,7 @@ export default function PhonebookPanel({ book, syncing, onSync, onMessage, onCal
     const url = window.location.origin;
     const text = INVITE_TEXT + url;
     if (navigator.share) {
-      navigator.share({ title: "RusAPP", text, url }).catch(() => null);
+      navigator.share({ title: "RuChat", text, url }).catch(() => null);
     } else {
       window.location.href = `sms:${e.phone}?body=${encodeURIComponent(text)}`;
     }
@@ -72,8 +72,8 @@ export default function PhonebookPanel({ book, syncing, onSync, onMessage, onCal
           </div>
           <p className="mt-1 text-[.85em] text-muted-foreground">
             {book.length
-              ? `${book.length} номеров · в RusAPP: ${inApp.length}`
-              : "Найдите, кто из ваших знакомых уже пользуется RusAPP"}
+              ? `${book.length} номеров · в RuChat: ${inApp.length}`
+              : "Найдите, кто из ваших знакомых уже пользуется RuChat"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -125,7 +125,7 @@ export default function PhonebookPanel({ book, syncing, onSync, onMessage, onCal
 
       {inApp.length > 0 && (
         <div className="mt-4">
-          <div className="mb-1 text-[.8em] font-medium uppercase tracking-wide text-muted-foreground">Уже в RusAPP</div>
+          <div className="mb-1 text-[.8em] font-medium uppercase tracking-wide text-muted-foreground">Уже в RuChat</div>
           <div className="divide-y divide-border">
             {inApp.map((e) => (
               <div key={e.phone} className="grid grid-cols-[42px_1fr_auto] items-center gap-3 py-2.5">

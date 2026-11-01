@@ -7,7 +7,7 @@ import {PLATFORM_META, PLATFORM_SCRIPTS} from "@/platform/scripts.gen";
 import {HMR_CLIENT} from "@/platform/dev-hmr";
 import appCss from "@/index.css?url";
 
-const TITLE = "RusAPP — защищённый российский мессенджер";
+const TITLE = "RuChat — защищённый российский мессенджер";
 const DESCRIPTION =
     "Без посредников и перехватов информации. Связь между двумя телефонами абонентов, без хранения переписки на серверах.";
 const OG_IMAGE = "https://cdn.poehali.dev/projects/56349fef-92d7-4870-a37e-94d25b539997/files/94a0723f-3320-4cca-a7eb-fa331ca0ce19.jpg";
@@ -20,7 +20,7 @@ export const Route = createRootRoute({
             {name: "theme-color", content: "#1F3A2B"},
             {name: "apple-mobile-web-app-capable", content: "yes"},
             {name: "mobile-web-app-capable", content: "yes"},
-            {name: "apple-mobile-web-app-title", content: "RusAPP"},
+            {name: "apple-mobile-web-app-title", content: "RuChat"},
             {title: TITLE},
             {name: "description", content: DESCRIPTION},
             {property: "og:title", content: TITLE},

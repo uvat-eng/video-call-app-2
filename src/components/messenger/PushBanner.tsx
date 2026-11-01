@@ -13,9 +13,9 @@ export default function PushBanner({ state, onEnable, onClose }: Props) {
     <div className="mx-2.5 mt-2.5 flex flex-wrap items-center gap-3 rounded-[14px] bg-primary px-4 py-3 text-primary-foreground lg:mx-10">
       <Icon name="BellRing" size={18} className="shrink-0" />
       <p className="min-w-0 flex-1 text-[.9em]">
-        {state === "default" && "Включите уведомления, чтобы звонки и сообщения приходили, даже когда RusAPP закрыт."}
+        {state === "default" && "Включите уведомления, чтобы звонки и сообщения приходили, даже когда RuChat закрыт."}
         {state === "ios-install" &&
-          "На iPhone уведомления работают после установки: нажмите «Поделиться» → «На экран «Домой»», затем откройте RusAPP с иконки."}
+          "На iPhone уведомления работают после установки: нажмите «Поделиться» → «На экран «Домой»», затем откройте RuChat с иконки."}
         {state === "denied" &&
           "Уведомления запрещены в настройках браузера — разрешите их для этого сайта, иначе звонки не дойдут при закрытом приложении."}
       </p>

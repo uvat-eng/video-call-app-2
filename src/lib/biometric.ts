@@ -27,7 +27,7 @@ export async function enableBiometric(vault: Vault, user: { id: number; name: st
   const cred = (await navigator.credentials.create({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
-      rp: { name: "RusAPP" },
+      rp: { name: "RuChat" },
       user: {
         id: new TextEncoder().encode(`rusapp-${user.id}`),
         name: user.phone,

@@ -68,12 +68,12 @@ export default function LinkScreen({ token, name, onLinked, onFresh, onLogout }:
     <div className="app-text grid min-h-[100dvh] place-items-center bg-background p-2.5">
       <div className="flex w-full max-w-[460px] flex-col gap-4 rounded-[14px] bg-card p-7">
         <span className="self-start rounded-lg bg-logo-bg px-1 py-0.5">
-          <img src={LOGO_URL} alt="RusAPP" className="h-8 w-auto" />
+          <img src={LOGO_URL} alt="RuChat" className="h-8 w-auto" />
         </span>
         <h1 className="text-[1.6em] font-semibold tracking-[-0.03em]">Подключите это устройство</h1>
         <p className="text-[.92em] text-muted-foreground">
           {name.split(" ")[0]}, ваш аккаунт уже открыт на другом устройстве. Чтобы перенести сюда переписку и ключи
-          шифрования, откройте RusAPP на телефоне: <b>Настройки → Связанные устройства</b> и введите код:
+          шифрования, откройте RuChat на телефоне: <b>Настройки → Связанные устройства</b> и введите код:
         </p>
         <div className="grid place-items-center rounded-[14px] bg-gradient-to-br from-tile-a to-tile-b py-6">
           {state === "loading" || state === "linking" ? (

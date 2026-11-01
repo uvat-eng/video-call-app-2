@@ -701,7 +701,7 @@ function MessengerApp({
       }
       await enableBiometric(e2e.vault, me);
       setBioOn(true);
-      return "Готово — теперь RusAPP открывается без кода.";
+      return "Готово — теперь RuChat открывается без кода.";
     } catch {
       return "Не удалось включить. Проверьте, что на телефоне настроен отпечаток или Face ID.";
     }
@@ -712,7 +712,7 @@ function MessengerApp({
       const state = await subscribePush(token, true);
       setPush(state);
       if (state === "denied") return "Уведомления запрещены в настройках телефона для этого сайта — разрешите их.";
-      if (state === "ios-install") return "На iPhone сначала добавьте RusAPP на экран «Домой» и откройте с иконки.";
+      if (state === "ios-install") return "На iPhone сначала добавьте RuChat на экран «Домой» и откройте с иконки.";
       if (state !== "granted") return "Этот браузер не поддерживает уведомления.";
       const r = await api<{ sent: number; devices: number }>("push_test", {}, token);
       return r.sent > 0
@@ -906,7 +906,7 @@ function MessengerApp({
     const chat = chats.find((c) => c.id === activeRef.current);
     if (!chat) return;
     if (!chat.group && !chat.peer.publicKey) {
-      setSendError(`${chat.peer.name} ещё не заходил(а) в RusAPP — файлы можно будет отправить после этого`);
+      setSendError(`${chat.peer.name} ещё не заходил(а) в RuChat — файлы можно будет отправить после этого`);
       return;
     }
     setSendError("");

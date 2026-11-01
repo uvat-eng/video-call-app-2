@@ -59,7 +59,7 @@ export default function DevicesSection({ token, onApprove }: Props) {
           Подключить устройство
         </div>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-[.9em] text-muted-foreground">
-          <li>Откройте RusAPP на компьютере или другом телефоне и войдите в этот же аккаунт.</li>
+          <li>Откройте RuChat на компьютере или другом телефоне и войдите в этот же аккаунт.</li>
           <li>На новом устройстве появится код из 8 символов.</li>
           <li>Введите его здесь — переписка и ключи шифрования зашифрованно перенесутся туда.</li>
         </ol>

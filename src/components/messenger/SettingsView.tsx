@@ -147,7 +147,7 @@ function PrivacySection({ bio, onLock, onClearHistory }: Props) {
           <div className="min-w-0 flex-1">
             <div className="font-head font-semibold">Вход через {bio.label}</div>
             <p className="text-[.85em] text-muted-foreground">
-              {bioMsg || (bio.on ? "Включено — код вводить не нужно." : "Открывайте RusAPP без ввода кода.")}
+              {bioMsg || (bio.on ? "Включено — код вводить не нужно." : "Открывайте RuChat без ввода кода.")}
             </p>
           </div>
           <button

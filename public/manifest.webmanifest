@@ -1,6 +1,6 @@
 {
-  "name": "RusAPP — сообщения и звонки",
-  "short_name": "RusAPP",
+  "name": "RuChat — сообщения и звонки",
+  "short_name": "RuChat",
   "description": "Защищённые сообщения, аудио- и видеозвонки",
   "start_url": "/",
   "scope": "/",

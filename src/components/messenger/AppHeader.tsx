@@ -25,9 +25,9 @@ export default function AppHeader({ tab, onTab, onNewCall, missed }: Props) {
     <header className="flex h-[58px] shrink-0 items-center justify-between gap-3 border-b border-border px-4 lg:px-10">
       <div className="flex items-center gap-2.5 font-head text-[1.2em] font-semibold tracking-[-0.03em]">
         <span className="rounded-lg bg-logo-bg px-1 py-0.5">
-          <img src={LOGO_URL} alt="RusAPP" className="h-7 w-auto" />
+          <img src={LOGO_URL} alt="RuChat" className="h-7 w-auto" />
         </span>
-        RusAPP
+        RuChat
       </div>
       <nav className="flex items-center gap-1 text-muted-foreground lg:gap-[22px]">
         {TABS.map((t) => (

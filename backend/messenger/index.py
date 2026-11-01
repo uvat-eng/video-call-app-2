@@ -168,7 +168,7 @@ def incoming_call(cur, me):
 
 
 def handler(event: dict, context) -> dict:
-    """API мессенджера RusAPP: регистрация, вход, контакты, чаты, сообщения и сигналинг звонков"""
+    """API мессенджера RuChat: регистрация, вход, контакты, чаты, сообщения и сигналинг звонков"""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": {
             "Access-Control-Allow-Origin": "*",
@@ -351,7 +351,7 @@ def handler(event: dict, context) -> dict:
             return resp(200, {"ok": True})
 
         if action == "push_test":
-            n = send_push(cur, S, me, {"type": "test", "title": "RusAPP", "body": "Уведомления работают"}, ttl=60, urgency="high")
+            n = send_push(cur, S, me, {"type": "test", "title": "RuChat", "body": "Уведомления работают"}, ttl=60, urgency="high")
             cur.execute(f"SELECT COUNT(*) AS n FROM {S}.push_subs WHERE user_id=%s", (me,))
             return resp(200, {"sent": n, "devices": cur.fetchone()["n"]})
 
@@ -372,7 +372,7 @@ def handler(event: dict, context) -> dict:
                 for w in waits:
                     send_push(cur, S, w["sender_id"], {
                         "type": "key_ready", "chatId": w["chat_id"], "uid": w["sender_id"], "peerKey": key,
-                        "title": f"{my_name} теперь в RusAPP", "body": "Ваши сообщения доставлены",
+                        "title": f"{my_name} теперь в RuChat", "body": "Ваши сообщения доставлены",
                     }, ttl=2419200, urgency="high")
                 cur.execute(f"DELETE FROM {S}.key_waits WHERE recipient_id=%s", (me,))
             return resp(200, {"ok": True})
@@ -446,7 +446,7 @@ def handler(event: dict, context) -> dict:
             cur.execute(f"SELECT {USER_COLS} FROM {S}.users u WHERE u.phone=%s", (phone,))
             u = cur.fetchone()
             if not u:
-                return err(404, "Пользователь с таким номером ещё не в RusAPP")
+                return err(404, "Пользователь с таким номером ещё не в RuChat")
             if u["id"] == me:
                 return err(400, "Это ваш номер")
             ensure_contact(cur, me, u["id"])

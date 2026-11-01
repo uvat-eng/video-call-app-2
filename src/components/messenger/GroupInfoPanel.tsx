@@ -79,7 +79,7 @@ export default function GroupInfoPanel({ group, me, contacts, onClose, onAction,
                   {m.id === me.id ? "Вы" : m.name}
                   {m.admin && <span className="ml-2 text-[.75em] font-normal text-muted-foreground">админ</span>}
                 </div>
-                <div className="truncate text-[.85em] text-muted-foreground">{m.publicKey ? presence(m) : "ещё не заходил(а) в RusAPP"}</div>
+                <div className="truncate text-[.85em] text-muted-foreground">{m.publicKey ? presence(m) : "ещё не заходил(а) в RuChat"}</div>
               </div>
               {group.admin && m.id !== me.id && (
                 <button
