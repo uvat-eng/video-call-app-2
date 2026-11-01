@@ -1,0 +1,17 @@
+{
+  "appName": "RuChat",
+  "displayName": "RuChat",
+  "bundleId": "ru.ruchat.app",
+  "backgroundColor": "#0A0603",
+  "accentColor": "#F5A623",
+  "orientation": "portrait",
+  "permissions": {
+    "NSCameraUsageDescription": "Камера нужна для видеозвонков, отправки фото и сканирования QR-кода при подключении компьютера.",
+    "NSMicrophoneUsageDescription": "Микрофон нужен для аудио- и видеозвонков.",
+    "NSPhotoLibraryUsageDescription": "Доступ к фото нужен, чтобы отправлять снимки в чат и ставить фото профиля.",
+    "NSPhotoLibraryAddUsageDescription": "Доступ нужен, чтобы сохранять фото и видео из чатов.",
+    "NSContactsUsageDescription": "Контакты нужны, чтобы найти друзей, которые уже пользуются RuChat.",
+    "NSFaceIDUsageDescription": "Face ID нужен, чтобы открывать RuChat без ввода кода."
+  },
+  "backgroundModes": ["audio", "voip", "remote-notification"]
+}

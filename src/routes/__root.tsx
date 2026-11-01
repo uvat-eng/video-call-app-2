@@ -41,7 +41,7 @@ export const Route = createRootRoute({
             {rel: "stylesheet", href: appCss},
             {rel: "icon", type: "image/svg+xml", href: "/favicon.svg"},
             {rel: "manifest", href: "/manifest.webmanifest"},
-            {rel: "apple-touch-icon", href: "/icon-192.png"},
+            {rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png"},
         ],
         // IMPORTANT: DO NOT REMOVE PLATFORM SCRIPTS AND THE DEV HMR CLIENT!
         scripts: [
