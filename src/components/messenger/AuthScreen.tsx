@@ -5,9 +5,10 @@ import { LOGO_URL } from "./AppHeader";
 import { cn } from "@/lib/utils";
 import { deviceName } from "@/lib/appearance";
 
-type Props = { onAuth: (token: string, user: User) => void };
+export type AuthExtra = { password: string; keyBackup: string | null; fresh: boolean };
+type Props = { onAuth: (token: string, user: User, extra: AuthExtra) => void; notice?: string };
 
-export default function AuthScreen({ onAuth }: Props) {
+export default function AuthScreen({ onAuth, notice }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
@@ -20,8 +21,13 @@ export default function AuthScreen({ onAuth }: Props) {
     setError("");
     setLoading(true);
     try {
-      const data = await api<{ token: string; user: User }>(mode, { phone, name, password, deviceName: deviceName() });
-      onAuth(data.token, data.user);
+      const data = await api<{ token: string; user: User; keyBackup?: string | null }>(mode, {
+        phone,
+        name,
+        password,
+        deviceName: deviceName(),
+      });
+      onAuth(data.token, data.user, { password, keyBackup: data.keyBackup ?? null, fresh: mode === "register" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
     } finally {
@@ -106,6 +112,7 @@ export default function AuthScreen({ onAuth }: Props) {
             autoComplete={mode === "register" ? "new-password" : "current-password"}
             className={field}
           />
+          {notice && !error && <p className="px-2 text-[.87em] text-muted-foreground">{notice}</p>}
           {error && <p className="px-2 text-[.87em] text-destructive">{error}</p>}
           <button
             type="submit"

@@ -15,6 +15,7 @@ export type User = {
   online: boolean;
   publicKey?: string | null;
   avatar?: string | null;
+  hasKeyBackup?: boolean;
 };
 
 export type GroupMemberInfo = User & { admin: boolean };

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { api, ApiError, TOKEN_KEY, type User } from "@/lib/messenger-data";
-import LinkScreen from "./LinkScreen";
 import { applyLook, loadLook } from "@/lib/appearance";
-import { importIdentity, type LinkBundle, loadIdentity, Vault, vaultKind, wipeVault, type E2E } from "@/lib/e2e";
-import AuthScreen from "./AuthScreen";
+import { importIdentity, loadIdentity, openKeyBackup, sealKeyBackup, Vault, vaultKind, wipeVault, type E2E } from "@/lib/e2e";
+import AuthScreen, { type AuthExtra } from "./AuthScreen";
 import PinScreen from "./PinScreen";
 import { registerSw, unsubscribePush } from "@/lib/push";
 import { clearSwSession, saveSwSession } from "@/lib/sw-session";
@@ -50,7 +49,8 @@ export default function Messenger() {
   }, []);
 
   const [pending, setPendingE2e] = useState<E2E | null>(null);
-  const [needLink, setNeedLink] = useState(false);
+  const authRef = useRef<AuthExtra | null>(null);
+  const [notice, setNotice] = useState("");
   const [vaultTick, setVaultTick] = useState(0);
 
   useEffect(() => {
@@ -62,11 +62,32 @@ export default function Messenger() {
   }, []);
   const unlockedKey = (id: number) => `rusapp_unlocked_${id}`;
 
-  const publish = async (id: E2E, user: User, t: string) => {
+  const restoreFromBackup = async (vault: Vault, user: User) => {
+    const auth = authRef.current;
+    if (!auth?.keyBackup) return false;
+    const backed = await openKeyBackup(auth.keyBackup, auth.password, user.id);
+    if (!backed) return false;
+    await importIdentity(vault, backed);
+    return true;
+  };
+
+  const prepareIdentity = async (vault: Vault, user: User, t: string) => {
+    let id = await loadIdentity(vault);
+    if (user.publicKey && user.publicKey !== id.pub && user.hasKeyBackup) {
+      if (!(await restoreFromBackup(vault, user))) throw new Error("stale-key");
+      id = await loadIdentity(vault);
+    }
     if (user.publicKey !== id.pub) {
       await api("set_key", { publicKey: id.pub }, t);
       setMe({ ...user, publicKey: id.pub });
     }
+    const auth = authRef.current;
+    if (auth && (!user.hasKeyBackup || user.publicKey !== id.pub)) {
+      const backup = await sealKeyBackup(vault, auth.password, user.id);
+      if (backup) await api("key_backup", { backup, password: auth.password }, t).catch(() => null);
+    }
+    authRef.current = null;
+    return id;
   };
 
   const openSession = (id: E2E, user: User) => {
@@ -84,9 +105,13 @@ export default function Messenger() {
     vaultKind(me.id)
       .then(async (kind) => {
         if (kind === "pin") return setVaultMode("unlock");
-        if (kind === "none" && me.publicKey && sessionStorage.getItem("rusapp_fresh") !== "1") return setNeedLink(true);
-        const id = await loadIdentity(await Vault.openDevice(me.id));
-        await publish(id, me, token);
+        const vault = await Vault.openDevice(me.id);
+        if (kind === "none" && me.publicKey && !authRef.current) {
+          vault.close();
+          throw new Error("stale-key");
+        }
+        if (kind === "none" && me.publicKey) await restoreFromBackup(vault, me);
+        const id = await prepareIdentity(vault, me, token);
         const locked = await id.vault.hasLock();
         const last = Number(localStorage.getItem(unlockedKey(me.id)) || 0);
         const recent = Date.now() - last < UNLOCK_GRACE_MS;
@@ -95,10 +120,18 @@ export default function Messenger() {
         setBioReady(locked && (await biometricAvailable()) && (await biometricEnabled(id.vault)));
         setVaultMode(locked ? "unlock" : "create");
       })
-      .catch(() => setVaultError("Не удалось подготовить защищённое хранилище на этом устройстве"));
+      .catch((e) => {
+        if (e instanceof Error && e.message === "stale-key") {
+          setNotice("Ключи шифрования обновились. Войдите ещё раз по номеру и паролю.");
+          return logoutRef.current();
+        }
+        setVaultError("Не удалось подготовить защищённое хранилище на этом устройстве");
+      });
   }, [me?.id, token, e2e, vaultTick]);
 
-  const onAuth = (t: string, u: User) => {
+  const onAuth = (t: string, u: User, extra: AuthExtra) => {
+    authRef.current = extra;
+    setNotice("");
     localStorage.setItem(TOKEN_KEY, t);
     setToken(t);
     setMe(u);
@@ -124,11 +157,14 @@ export default function Messenger() {
       return null;
     });
     setPendingE2e(null);
-    setNeedLink(false);
+    authRef.current = null;
     setVaultMode(null);
     setToken(null);
     setMe(null);
   }, [token, me]);
+
+  const logoutRef = useRef(logout);
+  logoutRef.current = logout;
 
   const openVault = async (pin: string) => {
     if (!me || !token) return "Нет сессии";
@@ -142,8 +178,7 @@ export default function Messenger() {
       const pinVault = await Vault.unlock(me.id, pin);
       const vault = pinVault.pin ? await pinVault.toDevice(me.id) : pinVault;
       if (!(await vault.hasLock())) await vault.setLock(pin);
-      const id = await loadIdentity(vault);
-      await publish(id, me, token);
+      const id = await prepareIdentity(vault, me, token);
       openSession(id, me);
       return null;
     } catch (e) {
@@ -162,23 +197,6 @@ export default function Messenger() {
     }
   };
 
-  const finishLink = async (bundle: LinkBundle) => {
-    if (!me || !token) return;
-    const vault = await Vault.openDevice(me.id, true);
-    await importIdentity(vault, bundle.identity as Parameters<typeof importIdentity>[1]);
-    if (bundle.history) await vault.set("history", bundle.history);
-    if (bundle.groupKeys) await vault.set("groupKeys", bundle.groupKeys);
-    vault.close();
-    setNeedLink(false);
-    setVaultTick((t) => t + 1);
-  };
-
-  const startFresh = () => {
-    sessionStorage.setItem("rusapp_fresh", "1");
-    setNeedLink(false);
-    setVaultTick((t) => t + 1);
-  };
-
   const resetVault = async () => {
     if (!me) return;
     pending?.vault.close();
@@ -190,10 +208,8 @@ export default function Messenger() {
   };
 
   if (!ready) return <Loader />;
-  if (!token || !me) return <AuthScreen onAuth={onAuth} />;
+  if (!token || !me) return <AuthScreen onAuth={onAuth} notice={notice} />;
   if (!e2e) {
-    if (needLink)
-      return <LinkScreen token={token} name={me.name} onLinked={finishLink} onFresh={startFresh} onLogout={logout} />;
     if (vaultError)
       return (
         <div className="grid h-[100dvh] place-items-center bg-background p-6 text-center text-muted-foreground">

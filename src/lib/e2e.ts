@@ -344,6 +344,32 @@ export async function importIdentity(vault: Vault, id: Identity) {
   await vault.set("identity", id);
 }
 
+const KEY_BACKUP_ITER = 310000;
+
+function backupSecret(password: string, userId: number) {
+  return `rusapp-key-backup:${userId}:${password}`;
+}
+
+export async function sealKeyBackup(vault: Vault, password: string, userId: number) {
+  const id = await vault.get<Identity>("identity");
+  if (!id) return null;
+  const salt = rnd(16);
+  const key = await pinKey(backupSecret(password, userId), salt, KEY_BACKUP_ITER);
+  const s = await aesEncrypt(key, JSON.stringify(id));
+  return JSON.stringify({ v: 1, salt: b64(salt), iter: KEY_BACKUP_ITER, ...s });
+}
+
+export async function openKeyBackup(blob: string, password: string, userId: number): Promise<Identity | null> {
+  try {
+    const p = JSON.parse(blob) as { salt: string; iter: number; iv: string; c: string };
+    const key = await pinKey(backupSecret(password, userId), unb64(p.salt), p.iter);
+    const id = JSON.parse(await aesDecrypt(key, p)) as Identity;
+    return id?.pkcs8 && id?.pub ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function newGroupKey() {
   const k = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
   return b64(await crypto.subtle.exportKey("raw", k));

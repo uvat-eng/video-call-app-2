@@ -226,7 +226,7 @@ def handler(event: dict, context) -> dict:
                 (th(tok), u["id"], device_label(body), max_msg_id(cur, u["id"])),
             )
             u["online"] = True
-            return resp(200, {"token": tok, "user": user_out(u)})
+            return resp(200, {"token": tok, "user": {**user_out(u), "hasKeyBackup": bool(u.get("key_backup"))}, "keyBackup": u.get("key_backup")})
 
         if not token:
             return err(401, "Нужно войти")
@@ -329,8 +329,9 @@ def handler(event: dict, context) -> dict:
             return resp(200, {"user": user_out(cur.fetchone())})
 
         if action == "me":
-            cur.execute(f"SELECT {USER_COLS} FROM {S}.users u WHERE u.id=%s", (me,))
-            return resp(200, {"user": user_out(cur.fetchone())})
+            cur.execute(f"SELECT {USER_COLS}, (u.key_backup IS NOT NULL) AS hkb FROM {S}.users u WHERE u.id=%s", (me,))
+            r = cur.fetchone()
+            return resp(200, {"user": {**user_out(r), "hasKeyBackup": bool(r["hkb"])}})
 
         if action == "push_key":
             _, pub = get_vapid(cur, S)
@@ -375,6 +376,17 @@ def handler(event: dict, context) -> dict:
                         "title": f"{my_name} теперь в RuChat", "body": "Ваши сообщения доставлены",
                     }, ttl=2419200, urgency="high")
                 cur.execute(f"DELETE FROM {S}.key_waits WHERE recipient_id=%s", (me,))
+            return resp(200, {"ok": True})
+
+        if action == "key_backup":
+            blob = str(body.get("backup") or "")
+            if len(blob) < 40 or len(blob) > 20000:
+                return err(400, "Некорректные данные")
+            cur.execute(f"SELECT password_hash, salt FROM {S}.users WHERE id=%s", (me,))
+            pu = cur.fetchone()
+            if hash_pw(str(body.get("password") or ""), pu["salt"]) != pu["password_hash"]:
+                return err(403, "Неверный пароль")
+            cur.execute(f"UPDATE {S}.users SET key_backup=%s WHERE id=%s", (blob, me))
             return resp(200, {"ok": True})
 
         if action == "peer_key":
