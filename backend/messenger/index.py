@@ -5,6 +5,7 @@ import secrets
 import psycopg2
 import psycopg2.extras
 from push import get_vapid, send_push
+import group
 
 S = "t_p46289391_video_call_app_2"
 RING_SECONDS = 45
@@ -333,7 +334,11 @@ def handler(event: dict, context) -> dict:
                     AND read_at IS NULL AND delivered_at IS NOT NULL""",
                     (read_chat, me),
                 )
-            return resp(200, {"chats": list_chats(cur, me), "inbox": inbox(cur, me), "incoming": incoming_call(cur, me)})
+            return resp(200, {"chats": list_chats(cur, me), "inbox": inbox(cur, me), "incoming": incoming_call(cur, me),
+                              "incomingGroup": group.incoming_group(cur, S, me)})
+
+        if action.startswith("group_"):
+            return group.handle(action, body, cur, S, me, resp, err)
 
         if action == "calls":
             cur.execute(
@@ -354,7 +359,7 @@ def handler(event: dict, context) -> dict:
                 direction = "out" if outgoing else ("in" if answered else "missed")
                 out.append({"id": r["id"], "kind": r["kind"], "direction": direction, "answered": answered,
                             "at": r["created_at"], "seconds": secs, "peer": user_out(r)})
-            return resp(200, {"calls": out})
+            return resp(200, {"calls": out, "groupCalls": group.history(cur, S, me)})
 
         if action == "call_start":
             other = int(body.get("userId") or 0)

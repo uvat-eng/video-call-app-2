@@ -8,6 +8,8 @@ import {
   type CallRecord,
   type ChatItem,
   type IncomingCall,
+  type IncomingGroup,
+  type GroupCallRecord,
   type InboxItem,
   type Message,
   type User,
@@ -23,6 +25,8 @@ import SettingsView from "./SettingsView";
 import AuthScreen from "./AuthScreen";
 import PinScreen from "./PinScreen";
 import PushBanner from "./PushBanner";
+import GroupCallScreen, { MAX_GROUP, type ActiveGroup } from "./GroupCallScreen";
+import ContactPicker from "./ContactPicker";
 import { matchContacts, type BookEntry, type PhoneContact } from "@/lib/phonebook";
 import { pushState, registerSw, subscribePush, unsubscribePush, type PushState } from "@/lib/push";
 import { cn } from "@/lib/utils";
@@ -31,6 +35,7 @@ type PollResult = {
   chats: ChatItem[];
   inbox: InboxItem[];
   incoming: IncomingCall | null;
+  incomingGroup: IncomingGroup | null;
 };
 
 type History = Record<number, Message[]>;
@@ -179,6 +184,12 @@ function MessengerApp({
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [callsLoaded, setCallsLoaded] = useState(false);
   const [call, setCall] = useState<ActiveCall | null>(null);
+  const [groupCall, setGroupCall] = useState<ActiveGroup | null>(null);
+  const [groupCalls, setGroupCalls] = useState<GroupCallRecord[]>([]);
+  const [groupPicker, setGroupPicker] = useState(false);
+  const seenGroups = useRef<Set<number>>(new Set());
+  const groupRef = useRef<ActiveGroup | null>(null);
+  groupRef.current = groupCall;
   const [sendError, setSendError] = useState("");
   const [book, setBook] = useState<BookEntry[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -300,7 +311,12 @@ function MessengerApp({
         ackRef.current.push(...received.map((r) => r.msg.id));
       }
       const inc = res.incoming;
-      if (inc && inc.offer && !callRef.current && !seenCalls.current.has(inc.id)) {
+      const ig = res.incomingGroup;
+      if (ig && !callRef.current && !groupRef.current && !seenGroups.current.has(ig.id)) {
+        seenGroups.current.add(ig.id);
+        setGroupCall({ kind: ig.kind, callId: ig.id, incoming: { host: ig.host, total: ig.total } });
+      }
+      if (inc && inc.offer && !callRef.current && !groupRef.current && !seenCalls.current.has(inc.id)) {
         seenCalls.current.add(inc.id);
         setCall({ peer: inc.peer, kind: inc.kind, incoming: { id: inc.id, offer: inc.offer } });
       }
@@ -372,12 +388,21 @@ function MessengerApp({
     const callId = Number(params.get("call") || 0);
     const chatId = Number(params.get("chat") || 0);
     if (callId || chatId) window.history.replaceState(null, "", "/");
+    const gid = Number(params.get("group") || 0);
+    if (gid) window.history.replaceState(null, "", "/");
+    if (gid && params.get("decline") === "1") {
+      seenGroups.current.add(gid);
+      api("group_decline", { callId: gid }, token).catch(() => null);
+    }
     if (callId) openCallById(callId, params.get("decline") === "1");
     if (chatId) pendingChatRef.current = chatId;
     const onMsg = (e: MessageEvent) => {
       const d = e.data as { type?: string; action?: string; data?: { type?: string; callId?: number; chatId?: number } };
       if (d?.type !== "notification-click" || !d.data) return;
-      if (d.data.type === "call" && d.data.callId) openCallById(d.data.callId, d.action === "decline");
+      if (d.data.type === "group_call" && d.data.callId && d.action === "decline") {
+        seenGroups.current.add(d.data.callId);
+        api("group_decline", { callId: d.data.callId }, token).catch(() => null);
+      } else if (d.data.type === "call" && d.data.callId) openCallById(d.data.callId, d.action === "decline");
       else if (d.data.chatId) pendingChatRef.current = d.data.chatId;
       poll();
     };
@@ -435,9 +460,10 @@ function MessengerApp({
   }, [token, handleAuthError]);
 
   const loadCalls = useCallback(() => {
-    api<{ calls: CallRecord[] }>("calls", {}, token)
+    api<{ calls: CallRecord[]; groupCalls: GroupCallRecord[] }>("calls", {}, token)
       .then((r) => {
         setCalls(r.calls);
+        setGroupCalls(r.groupCalls ?? []);
         setCallsLoaded(true);
       })
       .catch(handleAuthError);
@@ -523,8 +549,24 @@ function MessengerApp({
     await persist({});
   };
 
+  const openGroupPicker = () => {
+    loadContacts();
+    setGroupPicker(true);
+  };
+
+  const startGroup = (users: User[], kind: CallKind) => {
+    setGroupPicker(false);
+    if (call || groupCall || !users.length) return;
+    setGroupCall({ kind, invite: users });
+  };
+
+  const closeGroup = () => {
+    setGroupCall(null);
+    loadCalls();
+  };
+
   const startCall = (peer: User, kind: CallKind) => {
-    if (call) return;
+    if (call || groupCall) return;
     setCall({ peer, kind });
   };
 
@@ -533,11 +575,12 @@ function MessengerApp({
     loadCalls();
   };
 
-  const missed = calls.filter((c) => c.direction === "missed").length;
+  const missed =
+    calls.filter((c) => c.direction === "missed").length + groupCalls.filter((c) => c.direction === "missed").length;
 
   return (
     <div className="app-text flex h-[100dvh] flex-col overflow-hidden bg-background">
-      <AppHeader tab={tab} onTab={setTab} onNewCall={() => setTab("contacts")} missed={missed} />
+      <AppHeader tab={tab} onTab={setTab} onNewCall={openGroupPicker} missed={missed} />
       {!pushHidden && <PushBanner state={push} onEnable={enablePush} onClose={hidePush} />}
       <main
         className={cn(
@@ -587,7 +630,15 @@ function MessengerApp({
             )}
           </>
         )}
-        {tab === "calls" && <CallsView calls={calls} loaded={callsLoaded} onCall={startCall} />}
+        {tab === "calls" && (
+          <CallsView
+            calls={calls}
+            groupCalls={groupCalls}
+            loaded={callsLoaded}
+            onCall={startCall}
+            onGroup={openGroupPicker}
+          />
+        )}
         {tab === "contacts" && (
           <ContactsView
             contacts={contacts}
@@ -603,6 +654,27 @@ function MessengerApp({
           <SettingsView user={me} onSave={saveProfile} onLogout={onLogout} onLock={onLock} onClearHistory={clearHistory} />
         )}
       </main>
+      {groupPicker && (
+        <ContactPicker
+          title="Групповой звонок"
+          contacts={contacts}
+          max={MAX_GROUP - 1}
+          chooseKind
+          onCancel={() => setGroupPicker(false)}
+          onConfirm={startGroup}
+        />
+      )}
+      {groupCall && (
+        <GroupCallScreen
+          key={groupCall.callId ?? "new"}
+          group={groupCall}
+          me={me}
+          token={token}
+          e2e={e2e}
+          contacts={contacts}
+          onClose={closeGroup}
+        />
+      )}
       {call && (
         <CallScreen
           key={call.incoming?.id ?? `out-${call.peer.id}`}

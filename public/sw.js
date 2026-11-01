@@ -15,13 +15,13 @@ self.addEventListener("push", (event) => {
   }
   event.waitUntil(
     (async () => {
-      const isCall = data.type === "call";
+      const isCall = data.type === "call" || data.type === "group_call";
       if (!isCall && (await hasVisibleClient())) return;
       const options = {
         body: data.body || "",
         icon: "/icon-192.png",
         badge: "/badge-96.png",
-        tag: isCall ? "call-" + data.callId : "chat-" + data.chatId,
+        tag: isCall ? data.type + "-" + data.callId : "chat-" + data.chatId,
         renotify: true,
         requireInteraction: isCall,
         vibrate: isCall ? [400, 200, 400, 200, 400, 200, 400] : [200],
@@ -29,7 +29,7 @@ self.addEventListener("push", (event) => {
       };
       if (isCall) {
         options.actions = [
-          { action: "accept", title: "Ответить" },
+          { action: "accept", title: data.type === "group_call" ? "Открыть" : "Ответить" },
           { action: "decline", title: "Отклонить" },
         ];
       }
@@ -42,7 +42,9 @@ self.addEventListener("notificationclick", (event) => {
   const data = event.notification.data || {};
   event.notification.close();
   let url = "/";
-  if (data.type === "call") {
+  if (data.type === "group_call") {
+    url = "/?group=" + data.callId + (event.action === "decline" ? "&decline=1" : "");
+  } else if (data.type === "call") {
     url = "/?call=" + data.callId + (event.action === "decline" ? "&decline=1" : "");
   } else if (data.chatId) {
     url = "/?chat=" + data.chatId;

@@ -128,3 +128,18 @@ export function duration(seconds: number) {
   if (seconds < 60) return `${seconds} сек`;
   return `${Math.round(seconds / 60)} мин`;
 }
+
+export type GroupMember = { user: User; state: "invited" | "joined" | "left" | "declined" | "missed" };
+
+export type IncomingGroup = { id: number; kind: CallKind; host: User; total: number };
+
+export type GroupCallRecord = {
+  id: number;
+  kind: CallKind;
+  group: true;
+  total: number;
+  names: string;
+  at: string;
+  seconds: number;
+  direction: CallDirection;
+};
