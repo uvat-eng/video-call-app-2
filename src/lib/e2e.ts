@@ -177,13 +177,46 @@ export class Vault {
   }
 
   async toDevice(userId: number) {
-    const keys = ["identity", "history", "phonebook", "outbox", "applock"];
+    const all = (await this.keys()).filter((k) => k !== "meta" && k !== "devkey");
     const data: Record<string, unknown> = {};
-    for (const k of keys) data[k] = await this.get(k);
+    const media: Record<string, ArrayBuffer> = {};
+    for (const k of all) {
+      if (k.startsWith("media:")) {
+        const b = await this.getBytes(k);
+        if (b) media[k] = b;
+      } else data[k] = await this.get(k);
+    }
     this.close();
     const dev = await Vault.openDevice(userId, true);
-    for (const k of keys) if (data[k] !== null) await dev.set(k, data[k]);
+    for (const [k, v] of Object.entries(data)) if (v !== null) await dev.set(k, v);
+    for (const [k, v] of Object.entries(media)) await dev.putBytes(k, v);
     return dev;
+  }
+
+  async keys(prefix = "") {
+    const all = await idb<IDBValidKey[]>(this.db, "readonly", (s) => s.getAllKeys());
+    return all.map(String).filter((k) => k.startsWith(prefix));
+  }
+
+  async putBytes(name: string, data: ArrayBuffer) {
+    const iv = rnd(12);
+    const c = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, this.key, data);
+    await idb(this.db, "readwrite", (s) => s.put({ iv: b64(iv), bin: c }, name));
+  }
+
+  async getBytes(name: string): Promise<ArrayBuffer | null> {
+    const rec = await idb<{ iv: string; bin: ArrayBuffer } | undefined>(this.db, "readonly", (s) => s.get(name));
+    if (!rec?.bin) return null;
+    return crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(rec.iv) }, this.key, rec.bin);
+  }
+
+  async hasKey(name: string) {
+    const n = await idb<number>(this.db, "readonly", (s) => s.count(name));
+    return n > 0;
+  }
+
+  async remove(name: string) {
+    await idb(this.db, "readwrite", (s) => s.delete(name));
   }
 
   async get<T>(name: string): Promise<T | null> {

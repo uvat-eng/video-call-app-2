@@ -1,11 +1,35 @@
 import { api } from "@/lib/messenger-data";
-import { b64, unb64 } from "@/lib/e2e";
+import { b64, unb64, type Vault } from "@/lib/e2e";
 import type { FileMeta } from "@/lib/payload";
 
 export const MAX_FILE = 25 * 1024 * 1024;
 const CHUNK = 1024 * 1024;
 
 const cache = new Map<string, Promise<Blob>>();
+const local: { vault: Vault | null } = { vault: null };
+
+export function setMediaVault(v: Vault | null) {
+  local.vault = v;
+  cache.clear();
+}
+
+const mediaKey = (meta: FileMeta) => `media:${meta.urls[0]}`;
+
+export async function storeLocal(meta: FileMeta, blob: Blob) {
+  if (!local.vault) return;
+  await local.vault.putBytes(mediaKey(meta), await blob.arrayBuffer()).catch(() => undefined);
+}
+
+export async function isStoredLocally(meta: FileMeta) {
+  return local.vault ? local.vault.hasKey(mediaKey(meta)).catch(() => false) : false;
+}
+
+export async function prefetchMedia(metas: FileMeta[]) {
+  for (const m of metas) {
+    if (await isStoredLocally(m)) continue;
+    await loadDecrypted(m).catch(() => undefined);
+  }
+}
 
 export async function compressImage(file: File): Promise<{ blob: Blob; w: number; h: number }> {
   if (file.type === "image/gif" || file.type === "image/svg+xml") return { blob: file, w: 0, h: 0 };
@@ -63,6 +87,8 @@ export function loadDecrypted(meta: FileMeta): Promise<Blob> {
   let p = cache.get(id);
   if (!p) {
     p = (async () => {
+      const saved = local.vault ? await local.vault.getBytes(mediaKey(meta)).catch(() => null) : null;
+      if (saved) return new Blob([saved], { type: meta.mime || "application/octet-stream" });
       const key = await crypto.subtle.importKey("raw", unb64(meta.key), "AES-GCM", false, ["decrypt"]);
       const parts: ArrayBuffer[] = [];
       for (let i = 0; i < meta.urls.length; i++) {
@@ -71,7 +97,9 @@ export function loadDecrypted(meta: FileMeta): Promise<Blob> {
         const data = await res.arrayBuffer();
         parts.push(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(meta.ivs[i]) }, key, data));
       }
-      return new Blob(parts, { type: meta.mime || "application/octet-stream" });
+      const blob = new Blob(parts, { type: meta.mime || "application/octet-stream" });
+      await storeLocal(meta, blob);
+      return blob;
     })();
     p.catch(() => cache.delete(id));
     cache.set(id, p);

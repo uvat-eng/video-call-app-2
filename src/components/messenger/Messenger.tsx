@@ -17,7 +17,9 @@ import {
   groupPeer,
 } from "@/lib/messenger-data";
 import { encodePayload, isSilentText, previewText, type Payload } from "@/lib/payload";
-import { compressImage, uploadEncrypted } from "@/lib/files";
+import { compressImage, prefetchMedia, setMediaVault, storeLocal, uploadEncrypted } from "@/lib/files";
+import { createBackup, restoreBackup, saveBackupFile, sizeText } from "@/lib/backup";
+import { parsePayload, type FileMeta } from "@/lib/payload";
 import GroupCreate from "./GroupCreate";
 import LinkScreen from "./LinkScreen";
 import { applyLook, loadLook, saveLook, wallpaperCss, type Look } from "@/lib/appearance";
@@ -365,6 +367,22 @@ function MessengerApp({
   }, [e2e]);
 
   useEffect(() => {
+    setMediaVault(e2e.vault);
+    e2e.vault
+      .get<Record<number, string>>("groupKeys")
+      .then((saved) => {
+        for (const [k, v] of Object.entries(saved ?? {})) if (!groupKeys.current.has(Number(k))) groupKeys.current.set(Number(k), v);
+      })
+      .catch(() => undefined);
+    return () => setMediaVault(null);
+  }, [e2e]);
+
+  const saveGroupKeys = useCallback(() => {
+    const obj = Object.fromEntries(groupKeys.current);
+    saveChain.current = saveChain.current.then(() => e2e.vault.set("groupKeys", obj)).catch(() => undefined);
+  }, [e2e]);
+
+  useEffect(() => {
     reloadVault()
       .then((o) => {
         for (const id of Object.keys(o)) api("wait_key", { chatId: Number(id) }, token).catch(() => null);
@@ -485,12 +503,13 @@ function MessengerApp({
       try {
         const raw = await e2e.decrypt(g.key.senderKey, g.key.cipher, g.key.iv);
         groupKeys.current.set(g.id, raw);
+        saveGroupKeys();
         return raw;
       } catch {
         return null;
       }
     },
-    [e2e],
+    [e2e, saveGroupKeys],
   );
 
   const syncGroups = useCallback(
@@ -897,6 +916,7 @@ function MessengerApp({
       const prepared = isImage ? await compressImage(file) : { blob: file as Blob, w: 0, h: 0 };
       const mime = isImage && prepared.blob !== file ? "image/jpeg" : file.type || "application/octet-stream";
       const meta = await uploadEncrypted(prepared.blob, file.name, mime, token, (p) => setUploading(p));
+      await storeLocal(meta, prepared.blob);
       if (prepared.w) {
         meta.w = prepared.w;
         meta.h = prepared.h;
@@ -928,6 +948,7 @@ function MessengerApp({
         token,
       );
       groupKeys.current.set(-r.chatId, raw);
+      saveGroupKeys();
       setGroupCreate(false);
       pendingChatRef.current = r.chatId;
       await poll();
@@ -1063,6 +1084,73 @@ function MessengerApp({
       handleAuthError(e);
       return e instanceof Error ? e.message : "Не удалось подключить устройство";
     }
+  };
+
+  const allFiles = () => {
+    const out: FileMeta[] = [];
+    for (const list of Object.values(historyRef.current))
+      for (const m of list) {
+        const p = parsePayload(m.text);
+        if (p.t === "file") out.push(p);
+      }
+    return out;
+  };
+
+  const backup = {
+    stats: async () => {
+      const lists = Object.values(historyRef.current);
+      const files = (await e2e.vault.keys("media:")).length;
+      return { chats: lists.filter((l) => l.length).length, messages: lists.reduce((n, l) => n + l.length, 0), files };
+    },
+    onDownloadAll: async (progress: (t: string) => void) => {
+      const before = (await e2e.vault.keys("media:")).length;
+      const files = allFiles();
+      progress(`Загружаю файлы: ${files.length}…`);
+      await prefetchMedia(files);
+      return (await e2e.vault.keys("media:")).length - before;
+    },
+    onCreate: async (password: string, progress: (t: string) => void) => {
+      try {
+        await saveChain.current;
+        progress("Сохраняю на устройство фото и файлы из чатов…");
+        await prefetchMedia(allFiles());
+        const r = await createBackup(e2e.vault, me.id, password, progress);
+        const how = await saveBackupFile(r.blob);
+        if (how === "cancelled") return "Сохранение отменено";
+        localStorage.setItem("rusapp_last_backup", new Date().toISOString());
+        return `Копия создана: ${sizeText(r.blob.size)}, файлов внутри: ${r.files}. ${
+          how === "shared" ? "Сохраните её в «Файлы» или на диск." : "Файл сохранён в «Загрузки»."
+        }`;
+      } catch (e) {
+        return e instanceof Error ? e.message : "Не удалось создать копию";
+      }
+    },
+    onRestore: async (file: File, password: string) => {
+      try {
+        await saveChain.current;
+        const current = historyRef.current;
+        const currentKeys = Object.fromEntries(groupKeys.current);
+        await restoreBackup(file, me.id, password, e2e.vault);
+        const restored = (await e2e.vault.get<History>("history")) ?? {};
+        const merged: History = { ...restored };
+        for (const [k, list] of Object.entries(current)) {
+          const id = Number(k);
+          const map = new Map((merged[id] ?? []).map((m) => [m.id, m]));
+          for (const m of list) map.set(m.id, m);
+          merged[id] = [...map.values()].sort((a, b) => a.id - b.id).slice(-HISTORY_LIMIT);
+        }
+        const keys: Record<string, string> = {
+          ...((await e2e.vault.get<Record<string, string>>("groupKeys")) ?? {}),
+          ...currentKeys,
+        };
+        for (const [k, v] of Object.entries(keys)) groupKeys.current.set(Number(k), v);
+        await e2e.vault.set("groupKeys", keys);
+        await persist(merged);
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : "Не удалось восстановить копию";
+      }
+    },
   };
 
   const saveProfile = async (name: string, status: string) => {
@@ -1210,6 +1298,7 @@ function MessengerApp({
             onApproveDevice={approveDevice}
             look={look}
             onLook={changeLook}
+            backup={backup}
             onSave={saveProfile}
             onLogout={onLogout}
             onClearHistory={clearHistory}

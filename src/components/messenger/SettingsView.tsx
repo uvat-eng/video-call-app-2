@@ -7,6 +7,7 @@ import UserAvatar from "./UserAvatar";
 import ProfileSection from "./settings/ProfileSection";
 import AppearanceSection from "./settings/AppearanceSection";
 import DevicesSection from "./settings/DevicesSection";
+import BackupSection from "./settings/BackupSection";
 
 type Props = {
   user: User;
@@ -18,17 +19,19 @@ type Props = {
   onClearHistory: () => Promise<void>;
   onTestPush?: () => Promise<string>;
   onApproveDevice: (code: string) => Promise<string | null>;
+  backup: React.ComponentProps<typeof BackupSection>;
   look: Look;
   onLook: (look: Look) => void;
   bio?: { label: string; on: boolean; toggle: () => Promise<string> };
 };
 
-type Section = "profile" | "appearance" | "devices" | "privacy" | "notifications";
+type Section = "profile" | "appearance" | "devices" | "backup" | "privacy" | "notifications";
 
 const SECTIONS: [Section, string, string, string][] = [
   ["profile", "Профиль", "UserRound", "Фото, имя, статус"],
   ["appearance", "Оформление", "Palette", "Тема, обои, размер текста"],
   ["devices", "Связанные устройства", "MonitorSmartphone", "Компьютер, планшет"],
+  ["backup", "Резервная копия", "DatabaseBackup", "Чаты и файлы на устройстве"],
   ["privacy", "Конфиденциальность", "ShieldCheck", "Вход, шифрование, история"],
   ["notifications", "Уведомления", "BellRing", "Проверка доставки"],
 ];
@@ -94,6 +97,7 @@ export default function SettingsView(props: Props) {
         {section === "profile" && <ProfileSection user={user} onSave={props.onSave} onAvatar={props.onAvatar} />}
         {section === "appearance" && <AppearanceSection look={props.look} onChange={props.onLook} />}
         {section === "devices" && <DevicesSection token={props.token} onApprove={props.onApproveDevice} />}
+        {section === "backup" && <BackupSection {...props.backup} />}
         {section === "privacy" && <PrivacySection {...props} />}
         {section === "notifications" && <NotificationsSection onTestPush={props.onTestPush} />}
       </section>
