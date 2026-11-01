@@ -39,7 +39,7 @@ export default function PinScreen({ mode, name, onSubmit, onReset, onLogout, onB
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (pin.length < 6) return setError("Код — минимум 6 символов");
+    if (mode === "create" ? !/^\d{4}$/.test(pin) : pin.length < 4) return setError("Код — 4 цифры");
     if (mode === "create" && pin !== pin2) return setError("Коды не совпадают");
     setBusy(true);
     const err = await onSubmit(pin);
@@ -75,20 +75,22 @@ export default function PinScreen({ mode, name, onSubmit, onReset, onLogout, onB
         </p>
         <input
           value={pin}
-          onChange={(e) => setPin(e.target.value)}
+          onChange={(e) => setPin(mode === "create" ? e.target.value.replace(/\D/g, "").slice(0, 4) : e.target.value.slice(0, 32))}
           type="password"
           inputMode="numeric"
+          maxLength={mode === "create" ? 4 : 32}
           autoFocus
           autoComplete="off"
-          placeholder="Код доступа"
+          placeholder="Код из 4 цифр"
           className={field}
         />
         {mode === "create" && (
           <input
             value={pin2}
-            onChange={(e) => setPin2(e.target.value)}
+            onChange={(e) => setPin2(e.target.value.replace(/\D/g, "").slice(0, 4))}
             type="password"
             inputMode="numeric"
+            maxLength={4}
             autoComplete="off"
             placeholder="Повторите код"
             className={field}
