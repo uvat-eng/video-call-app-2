@@ -234,7 +234,35 @@ def handler(event: dict, context) -> dict:
             if len(key) < 40 or len(key) > 1000:
                 return err(400, "Некорректный ключ")
             cur.execute(f"UPDATE {S}.users SET public_key=%s WHERE id=%s", (key, me))
+            cur.execute(f"SELECT chat_id, sender_id FROM {S}.key_waits WHERE recipient_id=%s", (me,))
+            waits = cur.fetchall()
+            if waits:
+                cur.execute(f"SELECT name FROM {S}.users WHERE id=%s", (me,))
+                my_name = cur.fetchone()["name"]
+                for w in waits:
+                    send_push(cur, S, w["sender_id"], {
+                        "type": "key_ready", "chatId": w["chat_id"], "uid": w["sender_id"], "peerKey": key,
+                        "title": f"{my_name} теперь в RusAPP", "body": "Ваши сообщения доставлены",
+                    }, ttl=2419200, urgency="high")
+                cur.execute(f"DELETE FROM {S}.key_waits WHERE recipient_id=%s", (me,))
             return resp(200, {"ok": True})
+
+        if action == "wait_key":
+            chat_id = int(body.get("chatId") or 0)
+            peer = chat_access(cur, me, chat_id)
+            if not peer:
+                return err(403, "Нет доступа к чату")
+            cur.execute(f"SELECT public_key FROM {S}.users WHERE id=%s", (peer,))
+            pk = cur.fetchone()["public_key"]
+            if pk:
+                return resp(200, {"publicKey": pk})
+            ensure_contact(cur, peer, me)
+            cur.execute(
+                f"""INSERT INTO {S}.key_waits (chat_id, sender_id, recipient_id) VALUES (%s,%s,%s)
+                ON CONFLICT (chat_id, sender_id) DO NOTHING""",
+                (chat_id, me, peer),
+            )
+            return resp(200, {"publicKey": None})
 
         if action == "update_profile":
             name = str(body.get("name") or "").strip()[:80]

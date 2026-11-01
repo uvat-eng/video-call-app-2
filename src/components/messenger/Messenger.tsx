@@ -30,6 +30,7 @@ import ContactPicker from "./ContactPicker";
 import { matchContacts, type BookEntry, type PhoneContact } from "@/lib/phonebook";
 import { pushState, registerSw, subscribePush, unsubscribePush, type PushState } from "@/lib/push";
 import { cn } from "@/lib/utils";
+import { clearSwSession, saveSwSession } from "@/lib/sw-session";
 
 type PollResult = {
   chats: ChatItem[];
@@ -87,6 +88,7 @@ export default function Messenger() {
 
   const openSession = (id: E2E, user: User) => {
     sessionStorage.setItem(unlockedKey(user.id), "1");
+    if (token) saveSwSession(token, user.id);
     setPendingE2e(null);
     setVaultMode(null);
     setE2e(id);
@@ -124,6 +126,7 @@ export default function Messenger() {
       unsubscribePush(t).finally(() => api("logout", {}, t).catch(() => null));
     }
     if (me) sessionStorage.removeItem(unlockedKey(me.id));
+    clearSwSession();
     localStorage.removeItem(TOKEN_KEY);
     setE2e((cur) => {
       cur?.vault.close();
@@ -261,23 +264,26 @@ function MessengerApp({
   activeRef.current = activeId;
   callRef.current = call;
 
-  useEffect(() => {
-    e2e.vault
-      .get<History>("history")
-      .then((h) => {
-        historyRef.current = h ?? {};
-        setHistory(historyRef.current);
-      })
-      .catch(() => undefined)
-      .finally(() => setHistoryLoaded(true));
-    e2e.vault
-      .get<Record<number, Message[]>>("outbox")
-      .then((o) => {
-        outboxRef.current = o ?? {};
-        setOutbox(outboxRef.current);
-      })
-      .catch(() => undefined);
+  const reloadVault = useCallback(async () => {
+    await saveChain.current;
+    const [h, o] = await Promise.all([
+      e2e.vault.get<History>("history").catch(() => null),
+      e2e.vault.get<Record<number, Message[]>>("outbox").catch(() => null),
+    ]);
+    historyRef.current = h ?? {};
+    setHistory(historyRef.current);
+    outboxRef.current = o ?? {};
+    setOutbox(outboxRef.current);
+    return outboxRef.current;
   }, [e2e]);
+
+  useEffect(() => {
+    reloadVault()
+      .then((o) => {
+        for (const id of Object.keys(o)) api("wait_key", { chatId: Number(id) }, token).catch(() => null);
+      })
+      .finally(() => setHistoryLoaded(true));
+  }, [reloadVault, token]);
 
   const saveOutbox = useCallback(
     (next: Record<number, Message[]>) => {
@@ -351,7 +357,7 @@ function MessengerApp({
 
   const flushOutbox = useCallback(
     async (list: ChatItem[]) => {
-      if (flushingRef.current) return;
+      if (flushingRef.current || document.hidden) return;
       const ready = list.filter((c) => c.peer.publicKey && outboxRef.current[c.id]?.length);
       if (!ready.length) return;
       flushingRef.current = true;
@@ -443,6 +449,14 @@ function MessengerApp({
   }, [poll, historyLoaded]);
 
   useEffect(() => {
+    const onVis = () => {
+      if (!document.hidden) reloadVault().then(() => poll());
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [reloadVault, poll]);
+
+  useEffect(() => {
     setPush(pushState());
     setPushHidden(sessionStorage.getItem("rusapp_push_hidden") === "1");
     subscribePush(token, false)
@@ -497,6 +511,14 @@ function MessengerApp({
     if (chatId) pendingChatRef.current = chatId;
     const onMsg = (e: MessageEvent) => {
       const d = e.data as { type?: string; action?: string; data?: { type?: string; callId?: number; chatId?: number } };
+      if (d?.type === "vault-changed") {
+        reloadVault();
+        return;
+      }
+      if (d?.type === "key-ready") {
+        poll();
+        return;
+      }
       if (d?.type !== "notification-click" || !d.data) return;
       if (d.data.type === "group_call" && d.data.callId && d.action === "decline") {
         seenGroups.current.add(d.data.callId);
@@ -579,6 +601,11 @@ function MessengerApp({
     if (!peerKey) {
       const msg: Message = { id: -Date.now(), mine: true, text, at: new Date().toISOString(), read: false };
       saveOutbox({ ...outboxRef.current, [chatId]: [...(outboxRef.current[chatId] ?? []), msg] });
+      api<{ publicKey: string | null }>("wait_key", { chatId }, token)
+        .then((r) => {
+          if (r.publicKey) poll();
+        })
+        .catch(() => null);
       return;
     }
     const tempId = -Date.now();
