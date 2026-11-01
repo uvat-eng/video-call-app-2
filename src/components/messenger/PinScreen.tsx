@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { LOGO_URL } from "./AppHeader";
 
@@ -8,14 +8,33 @@ type Props = {
   onSubmit: (pin: string) => Promise<string | null>;
   onReset: () => void;
   onLogout: () => void;
+  onBiometric?: () => Promise<string | null>;
+  bioLabel?: string;
 };
 
-export default function PinScreen({ mode, name, onSubmit, onReset, onLogout }: Props) {
+export default function PinScreen({ mode, name, onSubmit, onReset, onLogout, onBiometric, bioLabel }: Props) {
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const autoTried = useRef(false);
+
+  const bio = async () => {
+    if (!onBiometric) return;
+    setError("");
+    setBusy(true);
+    const err = await onBiometric();
+    setBusy(false);
+    if (err) setError(err);
+  };
+
+  useEffect(() => {
+    if (onBiometric && !autoTried.current) {
+      autoTried.current = true;
+      bio();
+    }
+  }, [onBiometric]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +103,17 @@ export default function PinScreen({ mode, name, onSubmit, onReset, onLogout }: P
           <Icon name={busy ? "Loader2" : mode === "create" ? "Lock" : "Unlock"} size={16} className={busy ? "animate-spin" : ""} />
           {mode === "create" ? "Сохранить код" : "Открыть"}
         </button>
+        {onBiometric && (
+          <button
+            type="button"
+            onClick={bio}
+            disabled={busy}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-background font-head font-semibold text-foreground disabled:opacity-60"
+          >
+            <Icon name={bioLabel?.includes("Face") ? "ScanFace" : "Fingerprint"} size={18} />
+            Войти через {bioLabel}
+          </button>
+        )}
         <div className="mt-2 flex flex-wrap justify-between gap-2 text-[.8em] text-muted-foreground">
           {mode === "unlock" &&
             (confirmReset ? (

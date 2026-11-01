@@ -31,6 +31,14 @@ import { matchContacts, type BookEntry, type PhoneContact } from "@/lib/phoneboo
 import { pushState, registerSw, subscribePush, unsubscribePush, type PushState } from "@/lib/push";
 import { cn } from "@/lib/utils";
 import { clearSwSession, saveSwSession } from "@/lib/sw-session";
+import {
+  biometricAvailable,
+  biometricEnabled,
+  biometricLabel,
+  disableBiometric,
+  enableBiometric,
+  verifyBiometric,
+} from "@/lib/biometric";
 
 type PollResult = {
   chats: ChatItem[];
@@ -58,6 +66,7 @@ export default function Messenger() {
   const [me, setMe] = useState<User | null>(null);
   const [vaultMode, setVaultMode] = useState<"create" | "unlock" | null>(null);
   const [vaultError, setVaultError] = useState("");
+  const [bioReady, setBioReady] = useState(false);
   const [e2e, setE2e] = useState<E2E | null>(null);
 
   useEffect(() => {
@@ -109,6 +118,7 @@ export default function Messenger() {
         const recent = Date.now() - last < UNLOCK_GRACE_MS;
         if (locked && (sessionStorage.getItem(unlockedKey(me.id)) === "1" || recent)) return openSession(id, me);
         setPendingE2e(id);
+        setBioReady(locked && (await biometricAvailable()) && (await biometricEnabled(id.vault)));
         setVaultMode(locked ? "unlock" : "create");
       })
       .catch(() => setVaultError("Не удалось подготовить защищённое хранилище на этом устройстве"));
@@ -166,6 +176,17 @@ export default function Messenger() {
     }
   };
 
+  const bioUnlock = async () => {
+    if (!pending || !me) return "Нет сессии";
+    try {
+      if (!(await verifyBiometric(pending.vault))) return "Не удалось подтвердить личность";
+      openSession(pending, me);
+      return null;
+    } catch {
+      return "Вход отменён — введите код доступа";
+    }
+  };
+
   const resetVault = async () => {
     if (!me) return;
     pending?.vault.close();
@@ -197,6 +218,8 @@ export default function Messenger() {
         mode={vaultMode}
         name={me.name}
         onSubmit={openVault}
+        onBiometric={bioReady ? bioUnlock : undefined}
+        bioLabel={bioReady ? biometricLabel() : ""}
         onReset={resetVault}
         onLogout={logout}
       />
@@ -493,6 +516,31 @@ function MessengerApp({
       setPush(await subscribePush(token, true));
     } catch {
       setPush(pushState());
+    }
+  };
+
+  const [bioSupported, setBioSupported] = useState(false);
+  const [bioOn, setBioOn] = useState(false);
+
+  useEffect(() => {
+    biometricAvailable().then(async (ok) => {
+      setBioSupported(ok);
+      if (ok) setBioOn(await biometricEnabled(e2e.vault));
+    });
+  }, [e2e]);
+
+  const toggleBio = async () => {
+    try {
+      if (bioOn) {
+        await disableBiometric(e2e.vault);
+        setBioOn(false);
+        return "Выключено — при запуске будет спрашиваться код.";
+      }
+      await enableBiometric(e2e.vault, me);
+      setBioOn(true);
+      return "Готово — теперь RusAPP открывается без кода.";
+    } catch {
+      return "Не удалось включить. Проверьте, что на телефоне настроен отпечаток или Face ID.";
     }
   };
 
@@ -826,6 +874,7 @@ function MessengerApp({
             onLogout={onLogout}
             onClearHistory={clearHistory}
             onTestPush={testPush}
+            bio={bioSupported ? { label: biometricLabel(), on: bioOn, toggle: toggleBio } : undefined}
           />
         )}
       </main>

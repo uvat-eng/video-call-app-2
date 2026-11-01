@@ -10,9 +10,12 @@ type Props = {
   onLock?: () => void;
   onClearHistory: () => Promise<void>;
   onTestPush?: () => Promise<string>;
+  bio?: { label: string; on: boolean; toggle: () => Promise<string> };
 };
 
-export default function SettingsView({ user, onSave, onLogout, onLock, onClearHistory, onTestPush }: Props) {
+export default function SettingsView({ user, onSave, onLogout, onLock, onClearHistory, onTestPush, bio }: Props) {
+  const [bioMsg, setBioMsg] = useState("");
+  const [bioBusy, setBioBusy] = useState(false);
   const [pushMsg, setPushMsg] = useState("");
   const [testing, setTesting] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -81,8 +84,35 @@ export default function SettingsView({ user, onSave, onLogout, onLock, onClearHi
           </div>
         </form>
 
-        {onTestPush && (
+        {bio && (
           <div className="mt-8 flex flex-wrap items-center gap-3 rounded-[14px] bg-background p-5">
+            <Icon name={bio.label.includes("Face") ? "ScanFace" : "Fingerprint"} size={18} />
+            <div className="min-w-0 flex-1">
+              <div className="font-head font-semibold">Вход через {bio.label}</div>
+              <p className="text-[.85em] text-muted-foreground">
+                {bioMsg || (bio.on ? "Включено — код вводить не нужно." : "Открывайте RusAPP без ввода кода.")}
+              </p>
+            </div>
+            <button
+              disabled={bioBusy}
+              onClick={async () => {
+                setBioBusy(true);
+                setBioMsg(await bio.toggle());
+                setBioBusy(false);
+              }}
+              className={
+                bio.on
+                  ? "h-[38px] rounded-full bg-secondary px-[18px] font-head font-semibold text-secondary-foreground disabled:opacity-60"
+                  : "h-[38px] rounded-full bg-primary px-[18px] font-head font-semibold text-primary-foreground disabled:opacity-60"
+              }
+            >
+              {bio.on ? "Выключить" : "Включить"}
+            </button>
+          </div>
+        )}
+
+        {onTestPush && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-3 rounded-[14px] bg-background p-5">
             <Icon name="BellRing" size={18} />
             <div className="min-w-0 flex-1">
               <div className="font-head font-semibold">Уведомления</div>
