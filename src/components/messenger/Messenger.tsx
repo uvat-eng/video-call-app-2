@@ -22,6 +22,8 @@ import ContactsView from "./ContactsView";
 import SettingsView from "./SettingsView";
 import AuthScreen from "./AuthScreen";
 import PinScreen from "./PinScreen";
+import PushBanner from "./PushBanner";
+import { pushState, registerSw, subscribePush, unsubscribePush, type PushState } from "@/lib/push";
 import { cn } from "@/lib/utils";
 
 type PollResult = {
@@ -88,8 +90,15 @@ export default function Messenger() {
     setVaultMode(null);
   }, []);
 
+  useEffect(() => {
+    registerSw();
+  }, []);
+
   const logout = useCallback(() => {
-    if (token) api("logout", {}, token).catch(() => null);
+    if (token) {
+      const t = token;
+      unsubscribePush(t).finally(() => api("logout", {}, t).catch(() => null));
+    }
     localStorage.removeItem(TOKEN_KEY);
     lock();
     setToken(null);
@@ -164,12 +173,15 @@ function MessengerApp({
   const [callsLoaded, setCallsLoaded] = useState(false);
   const [call, setCall] = useState<ActiveCall | null>(null);
   const [sendError, setSendError] = useState("");
+  const [push, setPush] = useState<PushState>("unsupported");
+  const [pushHidden, setPushHidden] = useState(false);
 
   const activeRef = useRef<number | null>(null);
   const callRef = useRef<ActiveCall | null>(null);
   const seenCalls = useRef<Set<number>>(new Set());
   const pollingRef = useRef(false);
   const ackRef = useRef<number[]>([]);
+  const pendingChatRef = useRef<number | null>(null);
   const historyRef = useRef<History>({});
   const saveChain = useRef<Promise<void>>(Promise.resolve());
 
@@ -272,6 +284,64 @@ function MessengerApp({
   }, [poll, historyLoaded]);
 
   useEffect(() => {
+    setPush(pushState());
+    setPushHidden(sessionStorage.getItem("rusapp_push_hidden") === "1");
+    subscribePush(token, false)
+      .then(setPush)
+      .catch(() => null);
+  }, [token]);
+
+  const enablePush = async () => {
+    try {
+      setPush(await subscribePush(token, true));
+    } catch {
+      setPush(pushState());
+    }
+  };
+
+  const hidePush = () => {
+    sessionStorage.setItem("rusapp_push_hidden", "1");
+    setPushHidden(true);
+  };
+
+  const openCallById = useCallback(
+    async (callId: number, decline: boolean) => {
+      if (callRef.current || seenCalls.current.has(callId)) return;
+      try {
+        if (decline) {
+          seenCalls.current.add(callId);
+          await api("call_end", { callId }, token);
+          return;
+        }
+        const res = await api<{ status: string; offer: string | null; kind: CallKind }>("call_get", { callId }, token);
+        if (res.status !== "ringing" || !res.offer) return;
+        await poll();
+      } catch (e) {
+        handleAuthError(e);
+      }
+    },
+    [token, poll, handleAuthError],
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const callId = Number(params.get("call") || 0);
+    const chatId = Number(params.get("chat") || 0);
+    if (callId || chatId) window.history.replaceState(null, "", "/");
+    if (callId) openCallById(callId, params.get("decline") === "1");
+    if (chatId) pendingChatRef.current = chatId;
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data as { type?: string; action?: string; data?: { type?: string; callId?: number; chatId?: number } };
+      if (d?.type !== "notification-click" || !d.data) return;
+      if (d.data.type === "call" && d.data.callId) openCallById(d.data.callId, d.action === "decline");
+      else if (d.data.chatId) pendingChatRef.current = d.data.chatId;
+      poll();
+    };
+    navigator.serviceWorker?.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker?.removeEventListener("message", onMsg);
+  }, []);
+
+  useEffect(() => {
     let hiddenAt = 0;
     const onVis = () => {
       if (document.hidden) hiddenAt = Date.now();
@@ -304,8 +374,15 @@ function MessengerApp({
   };
 
   useEffect(() => {
-    if (chatsLoaded && activeId === null && chats.length > 0 && window.innerWidth >= 1024) openChat(chats[0].id);
-  }, [chatsLoaded]);
+    if (!chatsLoaded) return;
+    const want = pendingChatRef.current;
+    if (want && chats.some((c) => c.id === want)) {
+      pendingChatRef.current = null;
+      openChat(want);
+      return;
+    }
+    if (activeId === null && chats.length > 0 && window.innerWidth >= 1024) openChat(chats[0].id);
+  }, [chatsLoaded, chats.length]);
 
   const loadContacts = useCallback(() => {
     api<{ contacts: User[] }>("contacts", {}, token)
@@ -417,6 +494,7 @@ function MessengerApp({
   return (
     <div className="app-text flex h-[100dvh] flex-col overflow-hidden bg-background">
       <AppHeader tab={tab} onTab={setTab} onNewCall={() => setTab("contacts")} missed={missed} />
+      {!pushHidden && <PushBanner state={push} onEnable={enablePush} onClose={hidePush} />}
       <main
         className={cn(
           "grid min-h-0 flex-1 gap-2.5 px-2.5 pb-4 pt-2.5 lg:grid-cols-[340px_1fr] lg:grid-rows-[minmax(0,1fr)] lg:px-10",

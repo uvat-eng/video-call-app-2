@@ -4,6 +4,7 @@ import hashlib
 import secrets
 import psycopg2
 import psycopg2.extras
+from push import get_vapid, send_push
 
 S = "t_p46289391_video_call_app_2"
 RING_SECONDS = 45
@@ -206,6 +207,27 @@ def handler(event: dict, context) -> dict:
             cur.execute(f"SELECT {USER_COLS} FROM {S}.users u WHERE u.id=%s", (me,))
             return resp(200, {"user": user_out(cur.fetchone())})
 
+        if action == "push_key":
+            _, pub = get_vapid(cur, S)
+            return resp(200, {"publicKey": pub})
+
+        if action == "push_subscribe":
+            sub = body.get("subscription") or {}
+            endpoint = str(sub.get("endpoint") or "")
+            keys = sub.get("keys") or {}
+            if not endpoint.startswith("https://") or not keys.get("p256dh") or not keys.get("auth"):
+                return err(400, "Некорректная подписка")
+            cur.execute(
+                f"""INSERT INTO {S}.push_subs (user_id, endpoint, p256dh, auth) VALUES (%s,%s,%s,%s)
+                ON CONFLICT (endpoint) DO UPDATE SET user_id=EXCLUDED.user_id, p256dh=EXCLUDED.p256dh, auth=EXCLUDED.auth""",
+                (me, endpoint, keys["p256dh"], keys["auth"]),
+            )
+            return resp(200, {"ok": True})
+
+        if action == "push_unsubscribe":
+            cur.execute(f"DELETE FROM {S}.push_subs WHERE endpoint=%s AND user_id=%s", (str(body.get("endpoint") or ""), me))
+            return resp(200, {"ok": True})
+
         if action == "set_key":
             key = str(body.get("publicKey") or "")
             if len(key) < 40 or len(key) > 1000:
@@ -275,6 +297,10 @@ def handler(event: dict, context) -> dict:
                 (chat_id, me, cipher, iv, sender_key),
             )
             r = cur.fetchone()
+            cur.execute(f"SELECT name FROM {S}.users WHERE id=%s", (me,))
+            my_name = cur.fetchone()["name"]
+            send_push(cur, S, peer, {"type": "message", "chatId": chat_id, "from": my_name,
+                                     "title": my_name, "body": "Новое зашифрованное сообщение"}, ttl=86400, urgency="normal")
             return resp(200, {"id": r["id"], "at": r["created_at"]})
 
         if action == "poll":
@@ -341,9 +367,16 @@ def handler(event: dict, context) -> dict:
                 f"INSERT INTO {S}.calls (caller_id, callee_id, kind, offer) VALUES (%s,%s,%s,%s) RETURNING id",
                 (me, other, kind, offer),
             )
-            return resp(200, {"callId": cur.fetchone()["id"]})
+            new_id = cur.fetchone()["id"]
+            cur.execute(f"SELECT name FROM {S}.users WHERE id=%s", (me,))
+            my_name = cur.fetchone()["name"]
+            send_push(cur, S, other, {"type": "call", "callId": new_id, "kind": kind, "from": my_name,
+                                      "title": my_name,
+                                      "body": "Входящий видеозвонок" if kind == "video" else "Входящий аудиозвонок"},
+                      ttl=RING_SECONDS, urgency="high")
+            return resp(200, {"callId": new_id})
 
-        if action in ("call_get", "call_answer", "call_end"):
+        if action in ("call_get", "call_answer", "call_end", "call_reoffer", "call_reanswer"):
             call_id = int(body.get("callId") or 0)
             cur.execute(f"SELECT * FROM {S}.calls WHERE id=%s", (call_id,))
             c = cur.fetchone()
@@ -357,10 +390,27 @@ def handler(event: dict, context) -> dict:
                     (str(body.get("answer") or ""), call_id),
                 )
                 return resp(200, {"ok": True})
+            if action == "call_reoffer":
+                if c["status"] != "active":
+                    return err(409, "Звонок уже завершён")
+                seq = int(c["reseq"] or 0) + 1
+                cur.execute(
+                    f"UPDATE {S}.calls SET reoffer=%s, reseq=%s, reanswer=NULL WHERE id=%s",
+                    (json.dumps({"by": me, "data": str(body.get("offer") or "")}), seq, call_id),
+                )
+                return resp(200, {"seq": seq})
+            if action == "call_reanswer":
+                if c["status"] != "active":
+                    return err(409, "Звонок уже завершён")
+                cur.execute(
+                    f"UPDATE {S}.calls SET reanswer=%s, reanswer_seq=%s WHERE id=%s",
+                    (json.dumps({"by": me, "data": str(body.get("answer") or "")}), int(body.get("seq") or 0), call_id),
+                )
+                return resp(200, {"ok": True})
             if action == "call_end":
                 if c["status"] in ("ringing", "active"):
                     new_status = "declined" if c["status"] == "ringing" and c["callee_id"] == me else "ended"
-                    cur.execute(f"UPDATE {S}.calls SET status=%s, ended_at=NOW(), offer=NULL, answer=NULL WHERE id=%s", (new_status, call_id))
+                    cur.execute(f"UPDATE {S}.calls SET status=%s, ended_at=NOW(), offer=NULL, answer=NULL, reoffer=NULL, reanswer=NULL WHERE id=%s", (new_status, call_id))
                 else:
                     cur.execute(f"UPDATE {S}.calls SET offer=NULL, answer=NULL WHERE id=%s", (call_id,))
                 return resp(200, {"ok": True})
@@ -370,7 +420,18 @@ def handler(event: dict, context) -> dict:
                 if cur.fetchone()["old"]:
                     cur.execute(f"UPDATE {S}.calls SET status='missed', ended_at=NOW(), offer=NULL, answer=NULL WHERE id=%s", (call_id,))
                     status = "missed"
-            return resp(200, {"status": status, "answer": c["answer"] if c["caller_id"] == me else None})
+            reoffer = json.loads(c["reoffer"]) if c.get("reoffer") else None
+            reanswer = json.loads(c["reanswer"]) if c.get("reanswer") else None
+            return resp(200, {
+                "status": status,
+                "answer": c["answer"] if c["caller_id"] == me else None,
+                "offer": c["offer"] if c["callee_id"] == me and status == "ringing" else None,
+                "kind": c["kind"],
+                "reseq": c["reseq"],
+                "reoffer": reoffer["data"] if reoffer and reoffer["by"] != me else None,
+                "reanswerSeq": c["reanswer_seq"],
+                "reanswer": reanswer["data"] if reanswer and reanswer["by"] != me else None,
+            })
 
         return err(400, "Неизвестное действие")
     finally:

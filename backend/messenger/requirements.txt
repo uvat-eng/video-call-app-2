@@ -1,1 +1,3 @@
 psycopg2-binary
+pywebpush==2.5.0
+cryptography
