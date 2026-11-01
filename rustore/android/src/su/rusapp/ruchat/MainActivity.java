@@ -7,7 +7,11 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.widget.FrameLayout;
 import android.view.View;
 import android.view.ViewGroup;
 import android.database.Cursor;
@@ -46,8 +50,11 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#0A0603"));
-        web.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        setContentView(web);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.parseColor("#EEF1EC"));
+        root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(root);
+        applySafeArea(root);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -107,6 +114,36 @@ public class MainActivity extends Activity {
             web.loadUrl(data != null && HOST.equals(data.getHost()) ? data.toString() : START_URL);
         }
         web.setVisibility(View.VISIBLE);
+    }
+
+    private void applySafeArea(View root) {
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int l, t, r, b;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                int types = WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout();
+                android.graphics.Insets bars = insets.getInsets(types);
+                android.graphics.Insets ime = insets.getInsets(WindowInsets.Type.ime());
+                l = bars.left;
+                t = bars.top;
+                r = bars.right;
+                b = Math.max(bars.bottom, ime.bottom);
+            } else {
+                l = insets.getSystemWindowInsetLeft();
+                t = insets.getSystemWindowInsetTop();
+                r = insets.getSystemWindowInsetRight();
+                b = insets.getSystemWindowInsetBottom();
+            }
+            v.setPadding(l, t, r, b);
+            return insets;
+        });
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController c = getWindow().getInsetsController();
+            if (c != null) {
+                int light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                c.setSystemBarsAppearance(light, light);
+            }
+        }
+        root.requestApplyInsets();
     }
 
     private void handlePermission(PermissionRequest request) {
