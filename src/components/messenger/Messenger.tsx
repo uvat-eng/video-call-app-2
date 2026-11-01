@@ -178,6 +178,9 @@ function MessengerApp({
   const [history, setHistory] = useState<History>({});
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [pending, setPending] = useState<Record<number, Message[]>>({});
+  const [outbox, setOutbox] = useState<Record<number, Message[]>>({});
+  const outboxRef = useRef<Record<number, Message[]>>({});
+  const flushingRef = useRef(false);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [contacts, setContacts] = useState<User[]>([]);
@@ -217,7 +220,24 @@ function MessengerApp({
       })
       .catch(() => undefined)
       .finally(() => setHistoryLoaded(true));
+    e2e.vault
+      .get<Record<number, Message[]>>("outbox")
+      .then((o) => {
+        outboxRef.current = o ?? {};
+        setOutbox(outboxRef.current);
+      })
+      .catch(() => undefined);
   }, [e2e]);
+
+  const saveOutbox = useCallback(
+    (next: Record<number, Message[]>) => {
+      outboxRef.current = next;
+      setOutbox(next);
+      saveChain.current = saveChain.current.then(() => e2e.vault.set("outbox", next)).catch(() => undefined);
+    },
+    [e2e],
+  );
+
 
   useEffect(() => {
     e2e.vault
@@ -279,6 +299,34 @@ function MessengerApp({
     [persist],
   );
 
+  const flushOutbox = useCallback(
+    async (list: ChatItem[]) => {
+      if (flushingRef.current) return;
+      const ready = list.filter((c) => c.peer.publicKey && outboxRef.current[c.id]?.length);
+      if (!ready.length) return;
+      flushingRef.current = true;
+      try {
+        for (const chat of ready) {
+          for (const msg of [...(outboxRef.current[chat.id] ?? [])]) {
+            const sealed = await e2e.encrypt(chat.peer.publicKey!, msg.text);
+            const r = await api<{ id: number; at: string }>("send", { chatId: chat.id, ...sealed }, token);
+            await appendMessages([{ chatId: chat.id, msg: { id: r.id, mine: true, text: msg.text, at: r.at, read: false } }]);
+            const rest = (outboxRef.current[chat.id] ?? []).filter((m) => m.id !== msg.id);
+            const next = { ...outboxRef.current };
+            if (rest.length) next[chat.id] = rest;
+            else delete next[chat.id];
+            saveOutbox(next);
+          }
+        }
+      } catch {
+        return;
+      } finally {
+        flushingRef.current = false;
+      }
+    },
+    [e2e, token, saveOutbox, appendMessages],
+  );
+
   const handleAuthError = useCallback(
     (e: unknown) => {
       if (e instanceof ApiError && e.status === 401) onLogout();
@@ -296,6 +344,7 @@ function MessengerApp({
       const res = await api<PollResult>("poll", { ack, readChat }, token);
       setServerChats(res.chats);
       setChatsLoaded(true);
+      flushOutbox(res.chats);
       const received: { chatId: number; msg: Message }[] = [];
       for (const item of res.inbox) {
         let text: string;
@@ -326,7 +375,7 @@ function MessengerApp({
     } finally {
       pollingRef.current = false;
     }
-  }, [token, e2e, historyLoaded, appendMessages, handleAuthError]);
+  }, [token, e2e, historyLoaded, appendMessages, handleAuthError, flushOutbox]);
 
   useEffect(() => {
     if (!historyLoaded) return;
@@ -423,12 +472,12 @@ function MessengerApp({
   const chats = useMemo<ChatItem[]>(() => {
     return serverChats
       .map((c) => {
-        const list = history[c.id] ?? [];
+        const list = [...(history[c.id] ?? []), ...(outbox[c.id] ?? [])];
         const last = list[list.length - 1];
         return { ...c, lastText: last?.text ?? "", lastMine: last?.mine ?? false, lastAt: last?.at ?? c.lastAt };
       })
       .sort((a, b) => (b.lastAt ?? "").localeCompare(a.lastAt ?? ""));
-  }, [serverChats, history]);
+  }, [serverChats, history, outbox]);
 
   const openChat = (id: number) => {
     if (id !== activeRef.current) {
@@ -484,12 +533,13 @@ function MessengerApp({
     const chat = chats.find((c) => c.id === activeRef.current);
     if (!chat) return;
     const peerKey = chat.peer.publicKey;
-    if (!peerKey) {
-      setSendError(`${chat.peer.name} ещё не открывал(а) RusAPP с шифрованием — отправить сообщение пока нельзя`);
-      return;
-    }
     setSendError("");
     const chatId = chat.id;
+    if (!peerKey) {
+      const msg: Message = { id: -Date.now(), mine: true, text, at: new Date().toISOString(), read: false };
+      saveOutbox({ ...outboxRef.current, [chatId]: [...(outboxRef.current[chatId] ?? []), msg] });
+      return;
+    }
     const tempId = -Date.now();
     const temp: Message = { id: tempId, mine: true, text, at: new Date().toISOString(), read: false };
     setPending((p) => ({ ...p, [chatId]: [...(p[chatId] ?? []), temp] }));
@@ -508,8 +558,8 @@ function MessengerApp({
   const activeMessages = useMemo<Message[]>(() => {
     if (!active) return [];
     const list = (history[active.id] ?? []).map((m) => (m.mine ? { ...m, read: m.id <= active.readUpto } : m));
-    return [...list, ...(pending[active.id] ?? [])];
-  }, [active, history, pending]);
+    return [...list, ...(outbox[active.id] ?? []), ...(pending[active.id] ?? [])];
+  }, [active, history, pending, outbox]);
 
   const openChatWith = async (user: User) => {
     const existing = chats.find((c) => c.peer.id === user.id);

@@ -128,6 +128,12 @@ export default function ActiveChat({ peer, myKey, messages, loading, error, onSe
 
       <form onSubmit={submit} className="flex flex-wrap items-center gap-2.5 rounded-[14px] bg-card p-2.5">
         {error && <p className="w-full px-3 pt-1 text-[.85em] text-destructive">{error}</p>}
+        {!error && !peer.publicKey && messages.some((m) => m.mine && m.id < 0) && (
+          <p className="flex w-full items-center gap-1.5 px-3 pt-1 text-[.85em] text-muted-foreground">
+            <Icon name="Clock" size={14} />
+            Сообщения зашифруются и уйдут автоматически, как только {peer.name} откроет RusAPP
+          </p>
+        )}
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
