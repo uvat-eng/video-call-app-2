@@ -27,15 +27,32 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd, book,
   const online = contacts.filter((c) => c.online).length;
   const selected = contacts.find((c) => c.id === selectedId) ?? contacts[0];
 
+  const [inviteTo, setInviteTo] = useState("");
+  const [added, setAdded] = useState("");
+
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!phone.trim()) return;
+    setInviteTo("");
+    setAdded("");
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length < 10) return setAddError("Введите номер полностью, например +7 900 123-45-67");
     setAdding(true);
     setAddError("");
     const error = await onAdd(phone);
     setAdding(false);
-    if (error) setAddError(error);
-    else setPhone("");
+    if (error) {
+      setAddError(error);
+      if (error.includes("нет в RuChat")) setInviteTo(phone);
+    } else {
+      setAdded("Контакт добавлен — он появился в списке слева");
+      setPhone("");
+    }
+  };
+
+  const sendInvite = () => {
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const text = `Давай общаться в RuChat — защищённые сообщения и видеозвонки: ${window.location.origin}`;
+    window.location.href = `sms:${inviteTo.replace(/[^\d+]/g, "")}${ios ? "&" : "?"}body=${encodeURIComponent(text)}`;
   };
 
   return (
@@ -86,7 +103,11 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd, book,
           <div className="flex flex-wrap gap-2">
             <input
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => {
+                setPhone(e.target.value);
+                setAddError("");
+                setInviteTo("");
+              }}
               type="tel"
               placeholder="+7 900 000-00-00"
               className="h-[42px] min-w-0 flex-1 rounded-full bg-card px-[18px] outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/20"
@@ -100,6 +121,17 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd, book,
             </button>
           </div>
           {addError && <p className="mt-2 text-[.85em] text-destructive">{addError}</p>}
+          {added && <p className="mt-2 text-[.85em] text-foreground">{added}</p>}
+          {inviteTo && (
+            <button
+              type="button"
+              onClick={sendInvite}
+              className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-full bg-card px-4 text-[.85em] font-medium hover:bg-background"
+            >
+              <Icon name="Send" size={14} />
+              Пригласить по СМС
+            </button>
+          )}
         </form>
 
         {selected && (

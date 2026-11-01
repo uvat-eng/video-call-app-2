@@ -105,7 +105,12 @@ export async function api<T = Record<string, unknown>>(
 ): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["X-Auth-Token"] = token;
-  const res = await fetch(API_URL, { method: "POST", headers, body: JSON.stringify({ action, ...body }) });
+  let res: Response;
+  try {
+    res = await fetch(API_URL, { method: "POST", headers, body: JSON.stringify({ action, ...body }) });
+  } catch {
+    throw new ApiError("Нет связи с сервером. Проверьте интернет и попробуйте ещё раз", 0);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError((data as { error?: string }).error || "Ошибка сети", res.status);
   return data as T;

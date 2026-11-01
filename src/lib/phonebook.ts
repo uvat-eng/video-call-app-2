@@ -30,6 +30,52 @@ export function canPickContacts() {
   return !!contactsApi();
 }
 
+type NativeBridge = {
+  requestContacts: () => void;
+  hasContactsPermission: () => boolean;
+};
+
+type NativeWindow = Window & {
+  RuChatNative?: NativeBridge;
+  __ruchatContacts?: (json: string | null) => void;
+};
+
+function nativeBridge(): NativeBridge | null {
+  const w = window as NativeWindow;
+  return w.RuChatNative && typeof w.RuChatNative.requestContacts === "function" ? w.RuChatNative : null;
+}
+
+export function hasNativeContacts() {
+  return !!nativeBridge();
+}
+
+export function nativeContactsGranted() {
+  try {
+    return !!nativeBridge()?.hasContactsPermission();
+  } catch {
+    return false;
+  }
+}
+
+export function readNativeContacts(): Promise<PhoneContact[]> {
+  const bridge = nativeBridge();
+  if (!bridge) return Promise.reject(new Error("unsupported"));
+  return new Promise((resolve, reject) => {
+    const w = window as NativeWindow;
+    w.__ruchatContacts = (json) => {
+      w.__ruchatContacts = undefined;
+      if (json === null) return reject(new Error("denied"));
+      try {
+        const raw = JSON.parse(json) as { name?: string; phones?: string[] }[];
+        resolve(raw.map((c) => ({ name: c.name ?? "", phones: c.phones ?? [] })).filter((c) => c.phones.length));
+      } catch {
+        reject(new Error("parse"));
+      }
+    };
+    bridge.requestContacts();
+  });
+}
+
 export async function pickContacts(): Promise<PhoneContact[]> {
   const api = contactsApi();
   if (!api) return [];

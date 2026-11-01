@@ -10,7 +10,10 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
+import android.database.Cursor;
+import android.provider.ContactsContract;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -19,7 +22,12 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 
 public class MainActivity extends Activity {
@@ -27,6 +35,7 @@ public class MainActivity extends Activity {
     private static final String START_URL = "https://" + HOST + "/";
     private static final int REQ_PERMS = 1;
     private static final int REQ_FILE = 2;
+    private static final int REQ_CONTACTS = 3;
 
     private WebView web;
     private PermissionRequest pendingRequest;
@@ -49,6 +58,8 @@ public class MainActivity extends Activity {
         s.setAllowContentAccess(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setUserAgentString(s.getUserAgentString() + " RuChatAndroid/1.0");
+
+        web.addJavascriptInterface(new Bridge(), "RuChatNative");
 
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
@@ -120,8 +131,67 @@ public class MainActivity extends Activity {
         return checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED;
     }
 
+    private class Bridge {
+        @JavascriptInterface
+        public boolean hasContactsPermission() {
+            return granted(Manifest.permission.READ_CONTACTS);
+        }
+
+        @JavascriptInterface
+        public void requestContacts() {
+            runOnUiThread(() -> {
+                if (granted(Manifest.permission.READ_CONTACTS)) deliverContacts();
+                else requestPermissions(new String[]{Manifest.permission.READ_CONTACTS}, REQ_CONTACTS);
+            });
+        }
+    }
+
+    private void deliverContacts() {
+        new Thread(() -> {
+            String json = readContacts();
+            runOnUiThread(() -> web.evaluateJavascript(
+                    "window.__ruchatContacts && window.__ruchatContacts(" + (json == null ? "null" : JSONObject.quote(json)) + ")", null));
+        }).start();
+    }
+
+    private String readContacts() {
+        Map<String, JSONObject> byId = new LinkedHashMap<>();
+        String[] cols = {
+                ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER
+        };
+        try (Cursor c = getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, cols, null, null, null)) {
+            if (c == null) return "[]";
+            while (c.moveToNext()) {
+                String id = c.getString(0);
+                String name = c.getString(1);
+                String num = c.getString(2);
+                if (num == null) continue;
+                JSONObject o = byId.get(id);
+                if (o == null) {
+                    o = new JSONObject();
+                    o.put("name", name == null ? "" : name);
+                    o.put("phones", new JSONArray());
+                    byId.put(id, o);
+                }
+                o.getJSONArray("phones").put(num);
+            }
+            JSONArray out = new JSONArray();
+            for (JSONObject o : byId.values()) out.put(o);
+            return out.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        if (code == REQ_CONTACTS) {
+            if (granted(Manifest.permission.READ_CONTACTS)) deliverContacts();
+            else web.evaluateJavascript("window.__ruchatContacts && window.__ruchatContacts(null)", null);
+            return;
+        }
         if (code != REQ_PERMS || pendingRequest == null) return;
         List<String> allowed = new ArrayList<>();
         for (String r : pendingRequest.getResources()) {

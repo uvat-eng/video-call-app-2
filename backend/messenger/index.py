@@ -443,10 +443,12 @@ def handler(event: dict, context) -> dict:
 
         if action == "add_contact":
             phone = norm_phone(body.get("phone"))
+            if not phone:
+                return err(400, "Номер указан неверно. Пример: +7 900 123-45-67")
             cur.execute(f"SELECT {USER_COLS} FROM {S}.users u WHERE u.phone=%s", (phone,))
             u = cur.fetchone()
             if not u:
-                return err(404, "Пользователь с таким номером ещё не в RuChat")
+                return err(404, "Этого человека ещё нет в RuChat — пригласите его")
             if u["id"] == me:
                 return err(400, "Это ваш номер")
             ensure_contact(cur, me, u["id"])
