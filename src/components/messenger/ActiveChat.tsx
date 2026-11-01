@@ -2,19 +2,30 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { hhmm, presence, type CallKind, type Message, type User } from "@/lib/messenger-data";
+import { safetyCode } from "@/lib/e2e";
 
 type Props = {
   peer: User;
+  myKey: string;
   messages: Message[];
   loading: boolean;
+  error?: string;
   onSend: (text: string) => void;
   onCall: (kind: CallKind) => void;
   onBack?: () => void;
   className?: string;
 };
 
-export default function ActiveChat({ peer, messages, loading, onSend, onCall, onBack, className }: Props) {
+export default function ActiveChat({ peer, myKey, messages, loading, error, onSend, onCall, onBack, className }: Props) {
   const [text, setText] = useState("");
+  const [code, setCode] = useState<string[] | null>(null);
+  const [showCode, setShowCode] = useState(false);
+
+  useEffect(() => {
+    setShowCode(false);
+    setCode(null);
+    if (peer.publicKey) safetyCode(myKey, peer.publicKey).then(setCode);
+  }, [peer.publicKey, myKey]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastId = messages[messages.length - 1]?.id;
 
@@ -66,6 +77,28 @@ export default function ActiveChat({ peer, messages, loading, onSend, onCall, on
         ref={scrollRef}
         className="scroll-thin flex min-h-0 flex-col gap-2 overflow-y-auto rounded-[14px] bg-card px-6 py-[22px]"
       >
+        <button
+          type="button"
+          onClick={() => setShowCode((v) => !v)}
+          className="mx-auto mb-2 flex max-w-[460px] items-start gap-2 rounded-xl bg-gradient-to-br from-tile-a to-tile-b px-3.5 py-2.5 text-left text-[.8em] leading-snug"
+        >
+          <Icon name={peer.publicKey ? "Lock" : "LockOpen"} size={14} className="mt-0.5 shrink-0" />
+          <span>
+            {peer.publicKey
+              ? "Сообщения и звонки защищены сквозным шифрованием. Сервер не хранит переписку — она есть только на устройствах собеседников. Нажмите, чтобы сверить код безопасности."
+              : `${peer.name} ещё не включил(а) шифрование. Писать можно будет, когда собеседник откроет RusAPP.`}
+            {showCode && code && (
+              <span className="mt-2 grid grid-cols-3 gap-x-3 gap-y-1 font-head text-[1.15em] font-semibold tabular-nums tracking-wider">
+                {code.map((g, i) => (
+                  <span key={i}>{g}</span>
+                ))}
+                <span className="col-span-3 mt-1 font-body text-[.8em] font-normal tracking-normal text-muted-foreground">
+                  Если у собеседника такие же цифры — вас никто не подслушивает.
+                </span>
+              </span>
+            )}
+          </span>
+        </button>
         <div className="mt-auto" />
         {loading && messages.length === 0 && (
           <div className="grid place-items-center py-6 text-muted-foreground">
@@ -73,7 +106,7 @@ export default function ActiveChat({ peer, messages, loading, onSend, onCall, on
           </div>
         )}
         {!loading && messages.length === 0 && (
-          <p className="py-6 text-center text-muted-foreground">Напишите первое сообщение — {peer.name} увидит его сразу</p>
+          <p className="py-6 text-center text-muted-foreground">Здесь пока пусто. Напишите первое сообщение</p>
         )}
         {messages.map((m) => (
           <div
@@ -93,7 +126,8 @@ export default function ActiveChat({ peer, messages, loading, onSend, onCall, on
         ))}
       </div>
 
-      <form onSubmit={submit} className="flex items-center gap-2.5 rounded-[14px] bg-card p-2.5">
+      <form onSubmit={submit} className="flex flex-wrap items-center gap-2.5 rounded-[14px] bg-card p-2.5">
+        {error && <p className="w-full px-3 pt-1 text-[.85em] text-destructive">{error}</p>}
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Icon from "@/components/ui/icon";
 import {
   api,
@@ -8,9 +8,11 @@ import {
   type CallRecord,
   type ChatItem,
   type IncomingCall,
+  type InboxItem,
   type Message,
   type User,
 } from "@/lib/messenger-data";
+import { loadIdentity, Vault, vaultExists, wipeVault, type E2E } from "@/lib/e2e";
 import AppHeader, { type Tab } from "./AppHeader";
 import ChatList from "./ChatList";
 import ActiveChat from "./ActiveChat";
@@ -19,20 +21,34 @@ import CallsView from "./CallsView";
 import ContactsView from "./ContactsView";
 import SettingsView from "./SettingsView";
 import AuthScreen from "./AuthScreen";
+import PinScreen from "./PinScreen";
 import { cn } from "@/lib/utils";
 
 type PollResult = {
   chats: ChatItem[];
+  inbox: InboxItem[];
   incoming: IncomingCall | null;
-  chatId?: number;
-  messages?: Message[];
-  readUpto?: number;
 };
+
+type History = Record<number, Message[]>;
+
+const HISTORY_LIMIT = 3000;
+const AUTO_LOCK_MS = 10 * 60 * 1000;
+
+function Loader() {
+  return (
+    <div className="grid h-[100dvh] place-items-center bg-background text-muted-foreground">
+      <Icon name="Loader2" size={24} className="animate-spin" />
+    </div>
+  );
+}
 
 export default function Messenger() {
   const [ready, setReady] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<User | null>(null);
+  const [vaultMode, setVaultMode] = useState<"create" | "unlock" | null>(null);
+  const [e2e, setE2e] = useState<E2E | null>(null);
 
   useEffect(() => {
     const t = localStorage.getItem(TOKEN_KEY);
@@ -51,60 +67,150 @@ export default function Messenger() {
       .finally(() => setReady(true));
   }, []);
 
+  useEffect(() => {
+    if (!me || e2e) return;
+    vaultExists(me.id)
+      .then((exists) => setVaultMode(exists ? "unlock" : "create"))
+      .catch(() => setVaultMode("create"));
+  }, [me?.id, e2e]);
+
   const onAuth = (t: string, u: User) => {
     localStorage.setItem(TOKEN_KEY, t);
     setToken(t);
     setMe(u);
   };
 
-  const logout = () => {
+  const lock = useCallback(() => {
+    setE2e((cur) => {
+      cur?.vault.close();
+      return null;
+    });
+    setVaultMode(null);
+  }, []);
+
+  const logout = useCallback(() => {
     if (token) api("logout", {}, token).catch(() => null);
     localStorage.removeItem(TOKEN_KEY);
+    lock();
     setToken(null);
     setMe(null);
+  }, [token, lock]);
+
+  const openVault = async (pin: string) => {
+    if (!me || !token) return "Нет сессии";
+    try {
+      const vault = vaultMode === "create" ? await Vault.create(me.id, pin) : await Vault.unlock(me.id, pin);
+      const id = await loadIdentity(vault);
+      if (me.publicKey !== id.pub) {
+        await api("set_key", { publicKey: id.pub }, token);
+        setMe({ ...me, publicKey: id.pub });
+      }
+      setE2e(id);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : "Не удалось открыть хранилище";
+    }
   };
 
-  if (!ready)
-    return (
-      <div className="grid h-[100dvh] place-items-center bg-background text-muted-foreground">
-        <Icon name="Loader2" size={24} className="animate-spin" />
-      </div>
-    );
+  const resetVault = async () => {
+    if (!me) return;
+    await wipeVault(me.id);
+    setVaultMode("create");
+  };
+
+  if (!ready) return <Loader />;
   if (!token || !me) return <AuthScreen onAuth={onAuth} />;
-  return <MessengerApp token={token} me={me} setMe={setMe} onLogout={logout} />;
+  if (!e2e) {
+    if (!vaultMode) return <Loader />;
+    return (
+      <PinScreen
+        key={vaultMode}
+        mode={vaultMode}
+        name={me.name}
+        onSubmit={openVault}
+        onReset={resetVault}
+        onLogout={logout}
+      />
+    );
+  }
+  return <MessengerApp token={token} me={me} e2e={e2e} setMe={setMe} onLogout={logout} onLock={lock} />;
 }
 
 function MessengerApp({
   token,
   me,
+  e2e,
   setMe,
   onLogout,
+  onLock,
 }: {
   token: string;
   me: User;
+  e2e: E2E;
   setMe: (u: User) => void;
   onLogout: () => void;
+  onLock: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("chats");
-  const [chats, setChats] = useState<ChatItem[]>([]);
+  const [serverChats, setServerChats] = useState<ChatItem[]>([]);
   const [chatsLoaded, setChatsLoaded] = useState(false);
+  const [history, setHistory] = useState<History>({});
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [pending, setPending] = useState<Record<number, Message[]>>({});
   const [activeId, setActiveId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [msgLoading, setMsgLoading] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [contacts, setContacts] = useState<User[]>([]);
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [callsLoaded, setCallsLoaded] = useState(false);
   const [call, setCall] = useState<ActiveCall | null>(null);
+  const [sendError, setSendError] = useState("");
 
   const activeRef = useRef<number | null>(null);
-  const lastIdRef = useRef(0);
   const callRef = useRef<ActiveCall | null>(null);
   const seenCalls = useRef<Set<number>>(new Set());
   const pollingRef = useRef(false);
+  const ackRef = useRef<number[]>([]);
+  const historyRef = useRef<History>({});
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
 
   activeRef.current = activeId;
   callRef.current = call;
+
+  useEffect(() => {
+    e2e.vault
+      .get<History>("history")
+      .then((h) => {
+        historyRef.current = h ?? {};
+        setHistory(historyRef.current);
+      })
+      .catch(() => undefined)
+      .finally(() => setHistoryLoaded(true));
+  }, [e2e]);
+
+  const persist = useCallback(
+    (next: History) => {
+      historyRef.current = next;
+      setHistory(next);
+      saveChain.current = saveChain.current.then(() => e2e.vault.set("history", next)).catch(() => undefined);
+      return saveChain.current;
+    },
+    [e2e],
+  );
+
+  const appendMessages = useCallback(
+    (items: { chatId: number; msg: Message }[]) => {
+      if (!items.length) return saveChain.current;
+      const next: History = { ...historyRef.current };
+      for (const { chatId, msg } of items) {
+        const list = next[chatId] ? [...next[chatId]] : [];
+        if (!list.some((m) => m.id === msg.id)) list.push(msg);
+        list.sort((a, b) => a.id - b.id);
+        next[chatId] = list.slice(-HISTORY_LIMIT);
+      }
+      return persist(next);
+    },
+    [persist],
+  );
 
   const handleAuthError = useCallback(
     (e: unknown) => {
@@ -114,42 +220,48 @@ function MessengerApp({
   );
 
   const poll = useCallback(async () => {
-    if (pollingRef.current) return;
+    if (pollingRef.current || !historyLoaded) return;
     pollingRef.current = true;
-    const chatId = activeRef.current;
+    const ack = ackRef.current;
+    ackRef.current = [];
+    const readChat = !document.hidden ? (activeRef.current ?? 0) : 0;
     try {
-      const res = await api<PollResult>("poll", { chatId: chatId ?? 0, afterId: chatId ? lastIdRef.current : 0 }, token);
-      setChats(res.chats);
+      const res = await api<PollResult>("poll", { ack, readChat }, token);
+      setServerChats(res.chats);
       setChatsLoaded(true);
-      if (chatId && res.chatId === chatId && activeRef.current === chatId) {
-        const fresh = res.messages ?? [];
-        const readUpto = res.readUpto ?? 0;
-        if (fresh.length) lastIdRef.current = fresh[fresh.length - 1].id;
-        setMessages((prev) => {
-          const known = new Set(prev.map((m) => m.id));
-          const merged = [...prev.filter((m) => m.id > 0), ...fresh.filter((m) => !known.has(m.id))];
-          const pending = prev.filter((m) => m.id < 0 && !fresh.some((f) => f.mine && f.text === m.text));
-          return [...merged, ...pending].map((m) => (m.mine && m.id > 0 && m.id <= readUpto ? { ...m, read: true } : m));
-        });
-        setMsgLoading(false);
+      const received: { chatId: number; msg: Message }[] = [];
+      for (const item of res.inbox) {
+        let text: string;
+        try {
+          text = await e2e.decrypt(item.senderKey, item.cipher, item.iv);
+        } catch {
+          text = "Не удалось расшифровать сообщение: собеседник сменил устройство или ключ";
+        }
+        received.push({ chatId: item.chatId, msg: { id: item.id, mine: false, text, at: item.at, read: true } });
+      }
+      if (received.length) {
+        await appendMessages(received);
+        ackRef.current.push(...received.map((r) => r.msg.id));
       }
       const inc = res.incoming;
-      if (inc && !callRef.current && !seenCalls.current.has(inc.id)) {
+      if (inc && inc.offer && !callRef.current && !seenCalls.current.has(inc.id)) {
         seenCalls.current.add(inc.id);
         setCall({ peer: inc.peer, kind: inc.kind, incoming: { id: inc.id, offer: inc.offer } });
       }
     } catch (e) {
+      ackRef.current.unshift(...ack);
       handleAuthError(e);
     } finally {
       pollingRef.current = false;
     }
-  }, [token, handleAuthError]);
+  }, [token, e2e, historyLoaded, appendMessages, handleAuthError]);
 
   useEffect(() => {
+    if (!historyLoaded) return;
     poll();
     let t: number;
     const loop = () => {
-      const delay = document.hidden ? 10000 : 3000;
+      const delay = document.hidden ? 10000 : ackRef.current.length ? 600 : 3000;
       t = window.setTimeout(async () => {
         await poll();
         loop();
@@ -157,7 +269,39 @@ function MessengerApp({
     };
     loop();
     return () => window.clearTimeout(t);
-  }, [poll]);
+  }, [poll, historyLoaded]);
+
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVis = () => {
+      if (document.hidden) hiddenAt = Date.now();
+      else if (hiddenAt && Date.now() - hiddenAt > AUTO_LOCK_MS && !callRef.current) onLock();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [onLock]);
+
+  const chats = useMemo<ChatItem[]>(() => {
+    return serverChats
+      .map((c) => {
+        const list = history[c.id] ?? [];
+        const last = list[list.length - 1];
+        return { ...c, lastText: last?.text ?? "", lastMine: last?.mine ?? false, lastAt: last?.at ?? c.lastAt };
+      })
+      .sort((a, b) => (b.lastAt ?? "").localeCompare(a.lastAt ?? ""));
+  }, [serverChats, history]);
+
+  const openChat = (id: number) => {
+    if (id !== activeRef.current) {
+      activeRef.current = id;
+      setActiveId(id);
+      setSendError("");
+      setServerChats((prev) => prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
+      poll();
+    }
+    setMobileOpen(true);
+    setTab("chats");
+  };
 
   useEffect(() => {
     if (chatsLoaded && activeId === null && chats.length > 0 && window.innerWidth >= 1024) openChat(chats[0].id);
@@ -187,49 +331,45 @@ function MessengerApp({
     if (tab === "calls") loadCalls();
   }, [tab, loadContacts, loadCalls]);
 
-  const openChat = (id: number) => {
-    if (id !== activeRef.current) {
-      activeRef.current = id;
-      lastIdRef.current = 0;
-      setMessages([]);
-      setMsgLoading(true);
-      setActiveId(id);
-      setChats((prev) => prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
-      poll();
-    }
-    setMobileOpen(true);
-    setTab("chats");
-  };
+  const active = chats.find((c) => c.id === activeId);
 
   const send = async (text: string) => {
-    const chatId = activeRef.current;
-    if (!chatId) return;
+    const chat = chats.find((c) => c.id === activeRef.current);
+    if (!chat) return;
+    const peerKey = chat.peer.publicKey;
+    if (!peerKey) {
+      setSendError(`${chat.peer.name} ещё не открывал(а) RusAPP с шифрованием — отправить сообщение пока нельзя`);
+      return;
+    }
+    setSendError("");
+    const chatId = chat.id;
     const tempId = -Date.now();
-    const at = new Date().toISOString();
-    setMessages((prev) => [...prev, { id: tempId, mine: true, text, at, read: false }]);
-    setChats((prev) => {
-      const target = prev.find((c) => c.id === chatId);
-      if (!target) return prev;
-      return [{ ...target, lastText: text, lastAt: at, lastMine: true }, ...prev.filter((c) => c.id !== chatId)];
-    });
+    const temp: Message = { id: tempId, mine: true, text, at: new Date().toISOString(), read: false };
+    setPending((p) => ({ ...p, [chatId]: [...(p[chatId] ?? []), temp] }));
     try {
-      const r = await api<{ message: Message }>("send", { chatId, text }, token);
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === r.message.id)) return prev.filter((m) => m.id !== tempId);
-        return prev.map((m) => (m.id === tempId ? r.message : m));
-      });
+      const sealed = await e2e.encrypt(peerKey, text);
+      const r = await api<{ id: number; at: string }>("send", { chatId, ...sealed }, token);
+      await appendMessages([{ chatId, msg: { id: r.id, mine: true, text, at: r.at, read: false } }]);
     } catch (e) {
       handleAuthError(e);
-      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setSendError(e instanceof Error ? e.message : "Не удалось отправить");
+    } finally {
+      setPending((p) => ({ ...p, [chatId]: (p[chatId] ?? []).filter((m) => m.id !== tempId) }));
     }
   };
+
+  const activeMessages = useMemo<Message[]>(() => {
+    if (!active) return [];
+    const list = (history[active.id] ?? []).map((m) => (m.mine ? { ...m, read: m.id <= active.readUpto } : m));
+    return [...list, ...(pending[active.id] ?? [])];
+  }, [active, history, pending]);
 
   const openChatWith = async (user: User) => {
     const existing = chats.find((c) => c.peer.id === user.id);
     if (existing) return openChat(existing.id);
     try {
       const r = await api<{ chatId: number }>("open_chat", { userId: user.id }, token);
-      setChats((prev) => [{ id: r.chatId, peer: user, lastText: "", lastAt: null, lastMine: false, unread: 0 }, ...prev]);
+      setServerChats((prev) => [{ id: r.chatId, peer: user, lastAt: null, unread: 0, readUpto: 0 }, ...prev]);
       openChat(r.chatId);
     } catch (e) {
       handleAuthError(e);
@@ -258,6 +398,10 @@ function MessengerApp({
     }
   };
 
+  const clearHistory = async () => {
+    await persist({});
+  };
+
   const startCall = (peer: User, kind: CallKind) => {
     if (call) return;
     setCall({ peer, kind });
@@ -268,7 +412,6 @@ function MessengerApp({
     loadCalls();
   };
 
-  const active = chats.find((c) => c.id === activeId);
   const missed = calls.filter((c) => c.direction === "missed").length;
 
   return (
@@ -293,8 +436,10 @@ function MessengerApp({
             {active ? (
               <ActiveChat
                 peer={active.peer}
-                messages={messages}
-                loading={msgLoading}
+                myKey={e2e.pub}
+                messages={activeMessages}
+                loading={!historyLoaded}
+                error={sendError}
                 onSend={send}
                 onCall={(k) => startCall(active.peer, k)}
                 onBack={() => setMobileOpen(false)}
@@ -303,11 +448,11 @@ function MessengerApp({
             ) : (
               <section className="hidden flex-col items-center justify-center gap-3 rounded-[14px] bg-card p-8 text-center lg:flex">
                 <span className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-tile-a to-tile-b">
-                  <Icon name="MessageCircle" size={28} />
+                  <Icon name="ShieldCheck" size={28} />
                 </span>
                 <h1 className="hero-title">Здравствуйте, {me.name.split(" ")[0]}</h1>
-                <p className="max-w-[420px] text-muted-foreground">
-                  Выберите чат слева или добавьте человека по номеру телефона, чтобы написать или позвонить.
+                <p className="max-w-[440px] text-muted-foreground">
+                  Переписка и звонки защищены сквозным шифрованием: прочитать их можете только вы и собеседник.
                 </p>
                 <button
                   onClick={() => setTab("contacts")}
@@ -324,9 +469,19 @@ function MessengerApp({
         {tab === "contacts" && (
           <ContactsView contacts={contacts} onCall={startCall} onMessage={openChatWith} onAdd={addContact} />
         )}
-        {tab === "settings" && <SettingsView user={me} onSave={saveProfile} onLogout={onLogout} />}
+        {tab === "settings" && (
+          <SettingsView user={me} onSave={saveProfile} onLogout={onLogout} onLock={onLock} onClearHistory={clearHistory} />
+        )}
       </main>
-      {call && <CallScreen key={call.incoming?.id ?? `out-${call.peer.id}`} call={call} token={token} onClose={closeCall} />}
+      {call && (
+        <CallScreen
+          key={call.incoming?.id ?? `out-${call.peer.id}`}
+          call={call}
+          token={token}
+          e2e={e2e}
+          onClose={closeCall}
+        />
+      )}
     </div>
   );
 }

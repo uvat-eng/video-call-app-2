@@ -22,7 +22,7 @@ export default function ChatList({ chats, activeId, loaded, onSelect, onNew, cla
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return chats.filter((c) => {
-      if (q && !c.peer.name.toLowerCase().includes(q) && !c.lastText.toLowerCase().includes(q)) return false;
+      if (q && !c.peer.name.toLowerCase().includes(q) && !(c.lastText ?? "").toLowerCase().includes(q)) return false;
       if (filter === "unread" && c.unread === 0) return false;
       return true;
     });

@@ -13,15 +13,26 @@ export type User = {
   status: string;
   lastSeen?: string;
   online: boolean;
+  publicKey?: string | null;
 };
 
 export type ChatItem = {
   id: number;
   peer: User;
-  lastText: string;
   lastAt: string | null;
-  lastMine: boolean;
   unread: number;
+  readUpto: number;
+  lastText?: string;
+  lastMine?: boolean;
+};
+
+export type InboxItem = {
+  id: number;
+  chatId: number;
+  cipher: string;
+  iv: string;
+  senderKey: string;
+  at: string;
 };
 
 export type Message = {
@@ -45,7 +56,7 @@ export type CallRecord = {
 export type IncomingCall = {
   id: number;
   kind: CallKind;
-  offer: string;
+  offer: string | null;
   peer: User;
 };
 

@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { api, API_URL, type CallKind, type User } from "@/lib/messenger-data";
 import { createPeer, getMedia, waitIce } from "@/lib/webrtc";
+import type { E2E } from "@/lib/e2e";
 import UserAvatar from "./UserAvatar";
 
 export type ActiveCall = {
@@ -14,6 +15,7 @@ export type ActiveCall = {
 type Props = {
   call: ActiveCall;
   token: string;
+  e2e: E2E;
   onClose: () => void;
 };
 
@@ -23,7 +25,7 @@ function fmt(s: number) {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export default function CallScreen({ call, token, onClose }: Props) {
+export default function CallScreen({ call, token, e2e, onClose }: Props) {
   const isVideo = call.kind === "video";
   const [phase, setPhase] = useState<Phase>(call.incoming ? "ringing" : "connecting");
   const [endText, setEndText] = useState("Звонок завершён");
@@ -106,10 +108,12 @@ export default function CallScreen({ call, token, onClose }: Props) {
       await pc.setLocalDescription(await pc.createOffer());
       await waitIce(pc);
       if (cancelled) return;
+      if (!call.peer.publicKey) return finish(`${call.peer.name} ещё не включил(а) шифрование`, false);
       try {
+        const offer = await e2e.seal(call.peer.publicKey, JSON.stringify(pc.localDescription));
         const res = await api<{ callId: number }>(
           "call_start",
-          { userId: call.peer.id, kind: call.kind, offer: JSON.stringify(pc.localDescription) },
+          { userId: call.peer.id, kind: call.kind, offer },
           token,
         );
         callIdRef.current = res.callId;
@@ -136,7 +140,9 @@ export default function CallScreen({ call, token, onClose }: Props) {
         if (res.status === "ended") return finish("Звонок завершён", false);
         if (!gotAnswer && res.answer && pcRef.current) {
           gotAnswer = true;
-          await pcRef.current.setRemoteDescription(JSON.parse(res.answer));
+          const opened = await e2e.open(res.answer);
+          if (opened.senderKey !== call.peer.publicKey) return finish("Ключ собеседника не совпал — звонок прерван", true);
+          await pcRef.current.setRemoteDescription(JSON.parse(opened.text));
         }
       } catch {
         return;
@@ -192,10 +198,13 @@ export default function CallScreen({ call, token, onClose }: Props) {
     if (stream) attachLocal(stream);
     const pc = setupPeer(stream);
     try {
-      await pc.setRemoteDescription(JSON.parse(call.incoming.offer));
+      const opened = await e2e.open(call.incoming.offer);
+      if (call.peer.publicKey && opened.senderKey !== call.peer.publicKey) throw new Error("Ключ собеседника не совпал");
+      await pc.setRemoteDescription(JSON.parse(opened.text));
       await pc.setLocalDescription(await pc.createAnswer());
       await waitIce(pc);
-      await api("call_answer", { callId: call.incoming.id, answer: JSON.stringify(pc.localDescription) }, token);
+      const answer = await e2e.seal(opened.senderKey, JSON.stringify(pc.localDescription));
+      await api("call_answer", { callId: call.incoming.id, answer }, token);
     } catch (e) {
       finish(e instanceof Error ? e.message : "Не удалось ответить", true);
     }
@@ -219,10 +228,10 @@ export default function CallScreen({ call, token, onClose }: Props) {
   const showRemote = isVideo && phase === "live" && remoteVideo;
 
   return (
-    <div className="fixed inset-0 z-50 flex animate-in fade-in items-center justify-center bg-foreground/40 p-2.5 backdrop-blur-sm duration-200 lg:p-10">
+    <div className="fixed inset-0 z-50 flex animate-in fade-in duration-200">
       <div
         className={cn(
-          "relative flex h-full max-h-[760px] w-full max-w-[1100px] flex-col overflow-hidden rounded-[14px]",
+          "relative flex h-[100dvh] w-full flex-col overflow-hidden",
           isVideo ? "bg-primary text-primary-foreground" : "bg-gradient-to-br from-tile-a to-tile-b text-foreground",
         )}
       >
@@ -245,7 +254,7 @@ export default function CallScreen({ call, token, onClose }: Props) {
             )}
           >
             <Icon name="Lock" size={12} />
-            Защищено
+            Сквозное шифрование
           </span>
         </div>
 

@@ -45,10 +45,15 @@ def user_out(r):
         "status": r.get("status") or "",
         "lastSeen": r.get("last_seen"),
         "online": bool(r.get("online")),
+        "publicKey": r.get("public_key"),
     }
 
 
-USER_COLS = f"u.id, u.name, u.phone, u.status, u.last_seen, (u.last_seen > NOW() - INTERVAL '{ONLINE_SECONDS} seconds') AS online"
+def th(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+USER_COLS = f"u.id, u.name, u.phone, u.status, u.last_seen, u.public_key, (u.last_seen > NOW() - INTERVAL '{ONLINE_SECONDS} seconds') AS online"
 
 
 def chat_pair(a, b):
@@ -76,29 +81,24 @@ def list_chats(cur, me):
     cur.execute(
         f"""
         SELECT c.id AS chat_id, {USER_COLS},
-          lm.text AS last_text, lm.created_at AS last_at, lm.sender_id AS last_sender,
-          (SELECT COUNT(*) FROM {S}.messages m WHERE m.chat_id=c.id AND m.sender_id<>%s AND m.read_at IS NULL) AS unread
+          (SELECT MAX(m.created_at) FROM {S}.messages m WHERE m.chat_id=c.id) AS last_at,
+          (SELECT COALESCE(MAX(m.id),0) FROM {S}.messages m WHERE m.chat_id=c.id) AS last_id,
+          (SELECT COUNT(*) FROM {S}.messages m WHERE m.chat_id=c.id AND m.sender_id<>%s AND m.read_at IS NULL) AS unread,
+          (SELECT COALESCE(MAX(m.id),0) FROM {S}.messages m WHERE m.chat_id=c.id AND m.sender_id=%s AND m.read_at IS NOT NULL) AS read_upto
         FROM {S}.chats c
         JOIN {S}.users u ON u.id = CASE WHEN c.user_a=%s THEN c.user_b ELSE c.user_a END
-        LEFT JOIN LATERAL (
-          SELECT text, created_at, sender_id FROM {S}.messages m WHERE m.chat_id=c.id ORDER BY m.id DESC LIMIT 1
-        ) lm ON TRUE
         WHERE c.user_a=%s OR c.user_b=%s
-        ORDER BY COALESCE(lm.created_at, c.created_at) DESC
         """,
-        (me, me, me, me),
+        (me, me, me, me, me),
     )
-    out = []
-    for r in cur.fetchall():
-        out.append({
-            "id": r["chat_id"],
-            "peer": user_out(r),
-            "lastText": r["last_text"] or "",
-            "lastAt": r["last_at"],
-            "lastMine": r["last_sender"] == me,
-            "unread": int(r["unread"] or 0),
-        })
-    return out
+    rows = sorted(cur.fetchall(), key=lambda r: (r["last_id"], r["chat_id"]), reverse=True)
+    return [{
+        "id": r["chat_id"],
+        "peer": user_out(r),
+        "lastAt": r["last_at"],
+        "unread": int(r["unread"] or 0),
+        "readUpto": int(r["read_upto"] or 0),
+    } for r in rows]
 
 
 def chat_access(cur, me, chat_id):
@@ -109,30 +109,16 @@ def chat_access(cur, me, chat_id):
     return r["user_b"] if r["user_a"] == me else r["user_a"]
 
 
-def chat_messages(cur, me, chat_id, after_id):
+def inbox(cur, me):
     cur.execute(
-        f"UPDATE {S}.messages SET read_at=NOW() WHERE chat_id=%s AND sender_id<>%s AND read_at IS NULL",
-        (chat_id, me),
+        f"""SELECT m.id, m.chat_id, m.cipher, m.iv, m.sender_key, m.created_at
+        FROM {S}.messages m JOIN {S}.chats c ON c.id=m.chat_id
+        WHERE (c.user_a=%s OR c.user_b=%s) AND m.sender_id<>%s AND m.delivered_at IS NULL AND m.cipher IS NOT NULL
+        ORDER BY m.id LIMIT 200""",
+        (me, me, me),
     )
-    cur.execute(
-        f"""SELECT id, sender_id, text, created_at, read_at FROM {S}.messages
-        WHERE chat_id=%s AND id>%s ORDER BY id DESC LIMIT 200""",
-        (chat_id, after_id),
-    )
-    rows = list(reversed(cur.fetchall()))
-    cur.execute(
-        f"SELECT COALESCE(MAX(id),0) AS m FROM {S}.messages WHERE chat_id=%s AND sender_id=%s AND read_at IS NOT NULL",
-        (chat_id, me),
-    )
-    read_upto = cur.fetchone()["m"]
-    msgs = [{
-        "id": r["id"],
-        "mine": r["sender_id"] == me,
-        "text": r["text"],
-        "at": r["created_at"],
-        "read": r["read_at"] is not None,
-    } for r in rows]
-    return msgs, read_upto
+    return [{"id": r["id"], "chatId": r["chat_id"], "cipher": r["cipher"], "iv": r["iv"],
+             "senderKey": r["sender_key"], "at": r["created_at"]} for r in cur.fetchall()]
 
 
 def incoming_call(cur, me):
@@ -192,8 +178,8 @@ def handler(event: dict, context) -> dict:
             )
             uid = cur.fetchone()["id"]
             tok = secrets.token_hex(32)
-            cur.execute(f"INSERT INTO {S}.sessions (token, user_id) VALUES (%s,%s)", (tok, uid))
-            return resp(200, {"token": tok, "user": {"id": uid, "name": name, "phone": phone, "status": "", "online": True}})
+            cur.execute(f"INSERT INTO {S}.sessions (token, user_id) VALUES (%s,%s)", (th(tok), uid))
+            return resp(200, {"token": tok, "user": {"id": uid, "name": name, "phone": phone, "status": "", "online": True, "publicKey": None}})
 
         if action == "login":
             phone = norm_phone(body.get("phone"))
@@ -203,13 +189,13 @@ def handler(event: dict, context) -> dict:
             if not u or hash_pw(pw, u["salt"]) != u["password_hash"]:
                 return err(401, "Неверный номер или пароль")
             tok = secrets.token_hex(32)
-            cur.execute(f"INSERT INTO {S}.sessions (token, user_id) VALUES (%s,%s)", (tok, u["id"]))
+            cur.execute(f"INSERT INTO {S}.sessions (token, user_id) VALUES (%s,%s)", (th(tok), u["id"]))
             u["online"] = True
             return resp(200, {"token": tok, "user": user_out(u)})
 
         if not token:
             return err(401, "Нужно войти")
-        cur.execute(f"SELECT user_id FROM {S}.sessions WHERE token=%s", (token,))
+        cur.execute(f"SELECT user_id FROM {S}.sessions WHERE token=%s", (th(token),))
         s = cur.fetchone()
         if not s:
             return err(401, "Сессия истекла, войдите снова")
@@ -219,6 +205,13 @@ def handler(event: dict, context) -> dict:
         if action == "me":
             cur.execute(f"SELECT {USER_COLS} FROM {S}.users u WHERE u.id=%s", (me,))
             return resp(200, {"user": user_out(cur.fetchone())})
+
+        if action == "set_key":
+            key = str(body.get("publicKey") or "")
+            if len(key) < 40 or len(key) > 1000:
+                return err(400, "Некорректный ключ")
+            cur.execute(f"UPDATE {S}.users SET public_key=%s WHERE id=%s", (key, me))
+            return resp(200, {"ok": True})
 
         if action == "update_profile":
             name = str(body.get("name") or "").strip()[:80]
@@ -230,7 +223,7 @@ def handler(event: dict, context) -> dict:
             return resp(200, {"user": user_out(cur.fetchone())})
 
         if action == "logout":
-            cur.execute(f"DELETE FROM {S}.sessions WHERE token=%s", (token,))
+            cur.execute(f"DELETE FROM {S}.sessions WHERE token=%s", (th(token),))
             return resp(200, {"ok": True})
 
         if action == "contacts":
@@ -267,29 +260,40 @@ def handler(event: dict, context) -> dict:
 
         if action == "send":
             chat_id = int(body.get("chatId") or 0)
-            text = str(body.get("text") or "").strip()[:4000]
-            if not text:
-                return err(400, "Пустое сообщение")
+            cipher = str(body.get("cipher") or "")
+            iv = str(body.get("iv") or "")
+            sender_key = str(body.get("senderKey") or "")
+            if not cipher or not iv or not sender_key or len(cipher) > 24000 or len(iv) > 32:
+                return err(400, "Сообщение должно быть зашифровано")
             peer = chat_access(cur, me, chat_id)
             if not peer:
                 return err(403, "Нет доступа к чату")
             ensure_contact(cur, peer, me)
             cur.execute(
-                f"INSERT INTO {S}.messages (chat_id, sender_id, text) VALUES (%s,%s,%s) RETURNING id, created_at",
-                (chat_id, me, text),
+                f"""INSERT INTO {S}.messages (chat_id, sender_id, text, cipher, iv, sender_key)
+                VALUES (%s,%s,'',%s,%s,%s) RETURNING id, created_at""",
+                (chat_id, me, cipher, iv, sender_key),
             )
             r = cur.fetchone()
-            return resp(200, {"message": {"id": r["id"], "mine": True, "text": text, "at": r["created_at"], "read": False}})
+            return resp(200, {"id": r["id"], "at": r["created_at"]})
 
         if action == "poll":
-            result = {"chats": list_chats(cur, me), "incoming": incoming_call(cur, me)}
-            chat_id = int(body.get("chatId") or 0)
-            if chat_id and chat_access(cur, me, chat_id):
-                msgs, read_upto = chat_messages(cur, me, chat_id, int(body.get("afterId") or 0))
-                result["chatId"] = chat_id
-                result["messages"] = msgs
-                result["readUpto"] = read_upto
-            return resp(200, result)
+            ack = [int(x) for x in (body.get("ack") or [])[:500] if str(x).isdigit()]
+            if ack:
+                cur.execute(
+                    f"""UPDATE {S}.messages m SET cipher=NULL, iv=NULL, sender_key=NULL, delivered_at=NOW()
+                    FROM {S}.chats c WHERE c.id=m.chat_id AND (c.user_a=%s OR c.user_b=%s)
+                    AND m.sender_id<>%s AND m.id = ANY(%s)""",
+                    (me, me, me, ack),
+                )
+            read_chat = int(body.get("readChat") or 0)
+            if read_chat and chat_access(cur, me, read_chat):
+                cur.execute(
+                    f"""UPDATE {S}.messages SET read_at=NOW() WHERE chat_id=%s AND sender_id<>%s
+                    AND read_at IS NULL AND delivered_at IS NOT NULL""",
+                    (read_chat, me),
+                )
+            return resp(200, {"chats": list_chats(cur, me), "inbox": inbox(cur, me), "incoming": incoming_call(cur, me)})
 
         if action == "calls":
             cur.execute(
@@ -322,6 +326,10 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone() or other == me:
                 return err(404, "Пользователь не найден")
             cur.execute(
+                f"UPDATE {S}.calls SET offer=NULL, answer=NULL WHERE status NOT IN ('ringing','active') AND (caller_id=%s OR callee_id=%s) AND offer IS NOT NULL",
+                (me, me),
+            )
+            cur.execute(
                 f"""SELECT id FROM {S}.calls WHERE caller_id=%s AND callee_id=%s AND offer=%s
                 AND created_at > NOW() - INTERVAL '30 seconds' ORDER BY id DESC LIMIT 1""",
                 (me, other, offer),
@@ -352,13 +360,15 @@ def handler(event: dict, context) -> dict:
             if action == "call_end":
                 if c["status"] in ("ringing", "active"):
                     new_status = "declined" if c["status"] == "ringing" and c["callee_id"] == me else "ended"
-                    cur.execute(f"UPDATE {S}.calls SET status=%s, ended_at=NOW() WHERE id=%s", (new_status, call_id))
+                    cur.execute(f"UPDATE {S}.calls SET status=%s, ended_at=NOW(), offer=NULL, answer=NULL WHERE id=%s", (new_status, call_id))
+                else:
+                    cur.execute(f"UPDATE {S}.calls SET offer=NULL, answer=NULL WHERE id=%s", (call_id,))
                 return resp(200, {"ok": True})
             status = c["status"]
             if status == "ringing" and (c["created_at"] is not None):
                 cur.execute(f"SELECT (NOW() - %s) > INTERVAL '{RING_SECONDS} seconds' AS old", (c["created_at"],))
                 if cur.fetchone()["old"]:
-                    cur.execute(f"UPDATE {S}.calls SET status='missed', ended_at=NOW() WHERE id=%s", (call_id,))
+                    cur.execute(f"UPDATE {S}.calls SET status='missed', ended_at=NOW(), offer=NULL, answer=NULL WHERE id=%s", (call_id,))
                     status = "missed"
             return resp(200, {"status": status, "answer": c["answer"] if c["caller_id"] == me else None})
 

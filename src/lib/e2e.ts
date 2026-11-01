@@ -12,13 +12,13 @@ export function b64(buf: ArrayBuffer | Uint8Array) {
 
 export function unb64(s: string) {
   const bin = atob(s);
-  const out = new Uint8Array(bin.length);
+  const out = new Uint8Array(new ArrayBuffer(bin.length));
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
 
 function rnd(n: number) {
-  return crypto.getRandomValues(new Uint8Array(n));
+  return crypto.getRandomValues(new Uint8Array(new ArrayBuffer(n)));
 }
 
 type Sealed = { iv: string; c: string };
@@ -80,7 +80,7 @@ export function wipeVault(userId: number) {
 
 type Meta = { salt: string; iter: number; check: Sealed };
 
-async function pinKey(pin: string, salt: Uint8Array, iter: number) {
+async function pinKey(pin: string, salt: Uint8Array<ArrayBuffer>, iter: number) {
   const base = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
     { name: "PBKDF2", salt, iterations: iter, hash: "SHA-256" },

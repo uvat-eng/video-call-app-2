@@ -1,5 +1,34 @@
-{"tests": [
-  {"name": "Health", "method": "GET", "path": "/", "expectedStatus": 200, "expectedBody": {"ok": true}, "bodyMatcher": "partial"},
-  {"name": "Auth required", "method": "POST", "path": "/", "body": {"action": "poll"}, "expectedStatus": 401},
-  {"name": "Bad login", "method": "POST", "path": "/", "body": {"action": "login", "phone": "+70000000000", "password": "nopenope"}, "expectedStatus": 401}
-]}
+{
+ "tests": [
+  {
+   "name": "Health",
+   "method": "GET",
+   "path": "/",
+   "expectedStatus": 200,
+   "expectedBody": {
+    "ok": true
+   },
+   "bodyMatcher": "partial"
+  },
+  {
+   "name": "Auth required",
+   "method": "POST",
+   "path": "/",
+   "body": {
+    "action": "poll"
+   },
+   "expectedStatus": 401
+  },
+  {
+   "name": "Bad login",
+   "method": "POST",
+   "path": "/",
+   "body": {
+    "action": "login",
+    "phone": "+70000000000",
+    "password": "nopenope"
+   },
+   "expectedStatus": 401
+  }
+ ]
+}
