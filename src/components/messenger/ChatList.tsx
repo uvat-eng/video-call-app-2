@@ -10,12 +10,13 @@ type Props = {
   loaded: boolean;
   onSelect: (id: number) => void;
   onNew: () => void;
+  onNewGroup?: () => void;
   className?: string;
 };
 
-type Filter = "all" | "unread";
+type Filter = "all" | "unread" | "groups";
 
-export default function ChatList({ chats, activeId, loaded, onSelect, onNew, className }: Props) {
+export default function ChatList({ chats, activeId, loaded, onSelect, onNew, onNewGroup, className }: Props) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
 
@@ -24,6 +25,7 @@ export default function ChatList({ chats, activeId, loaded, onSelect, onNew, cla
     return chats.filter((c) => {
       if (q && !c.peer.name.toLowerCase().includes(q) && !(c.lastText ?? "").toLowerCase().includes(q)) return false;
       if (filter === "unread" && c.unread === 0) return false;
+      if (filter === "groups" && !c.group) return false;
       return true;
     });
   }, [chats, query, filter]);
@@ -36,6 +38,16 @@ export default function ChatList({ chats, activeId, loaded, onSelect, onNew, cla
         <h2 className="text-[1.6em] font-semibold tracking-[-0.03em]">Чаты</h2>
         <div className="flex items-center gap-2">
           {totalUnread > 0 && <span className="text-[.8em] text-muted-foreground">{totalUnread} новых</span>}
+          {onNewGroup && (
+            <button
+              onClick={onNewGroup}
+              aria-label="Новая группа"
+              title="Новая группа"
+              className="grid h-9 w-9 place-items-center rounded-full bg-secondary text-secondary-foreground transition-transform hover:scale-105"
+            >
+              <Icon name="Users" size={16} />
+            </button>
+          )}
           <button
             onClick={onNew}
             aria-label="Новый чат"
@@ -64,6 +76,7 @@ export default function ChatList({ chats, activeId, loaded, onSelect, onNew, cla
           [
             ["all", "Все"],
             ["unread", "Непрочитанные"],
+            ["groups", "Группы"],
           ] as [Filter, string][]
         ).map(([id, label]) => (
           <button
@@ -105,11 +118,17 @@ export default function ChatList({ chats, activeId, loaded, onSelect, onNew, cla
               c.id === activeId ? "bg-background" : "hover:bg-background/60",
             )}
           >
-            <UserAvatar user={c.peer} />
+            {c.group ? (
+              <span className="grid h-[42px] w-[42px] place-items-center rounded-full bg-gradient-to-br from-tile-a to-tile-b">
+                <Icon name="Users" size={18} />
+              </span>
+            ) : (
+              <UserAvatar user={c.peer} />
+            )}
             <div className="min-w-0">
               <div className="truncate font-medium">{c.peer.name}</div>
               <div className="truncate text-[.87em] text-muted-foreground">
-                {c.lastText ? `${c.lastMine ? "Вы: " : ""}${c.lastText}` : "Новый чат"}
+                {c.lastText ? `${c.lastMine ? "Вы: " : ""}${c.lastText}` : c.group ? `${c.group.members.length} участн.` : "Новый чат"}
               </div>
             </div>
             <div className="text-right text-[.8em] text-muted-foreground">

@@ -6,6 +6,10 @@ import psycopg2
 import psycopg2.extras
 from push import get_vapid, send_push
 import group
+import gchat
+import base64
+import uuid
+import boto3
 
 S = "t_p46289391_video_call_app_2"
 RING_SECONDS = 45
@@ -340,16 +344,16 @@ def handler(event: dict, context) -> dict:
             cipher = str(body.get("cipher") or "")
             iv = str(body.get("iv") or "")
             sender_key = str(body.get("senderKey") or "")
-            if not cipher or not iv or not sender_key or len(cipher) > 24000 or len(iv) > 32:
+            if not cipher or not iv or not sender_key or len(cipher) > 60000 or len(iv) > 32:
                 return err(400, "Сообщение должно быть зашифровано")
             peer = chat_access(cur, me, chat_id)
             if not peer:
                 return err(403, "Нет доступа к чату")
             ensure_contact(cur, peer, me)
             cur.execute(
-                f"""INSERT INTO {S}.messages (chat_id, sender_id, text, cipher, iv, sender_key)
-                VALUES (%s,%s,'',%s,%s,%s) RETURNING id, created_at""",
-                (chat_id, me, cipher, iv, sender_key),
+                f"""INSERT INTO {S}.messages (chat_id, sender_id, text, cipher, iv, sender_key, read_at)
+                VALUES (%s,%s,'',%s,%s,%s, CASE WHEN %s THEN NOW() ELSE NULL END) RETURNING id, created_at""",
+                (chat_id, me, cipher, iv, sender_key, bool(body.get("silent"))),
             )
             r = cur.fetchone()
             cur.execute(f"SELECT name FROM {S}.users WHERE id=%s", (me,))
@@ -359,9 +363,10 @@ def handler(event: dict, context) -> dict:
                 WHERE (c.user_a=%s OR c.user_b=%s) AND m.sender_id<>%s AND m.read_at IS NULL""",
                 (peer, peer, peer),
             )
-            badge = cur.fetchone()["n"]
-            send_push(cur, S, peer, {"type": "message", "chatId": chat_id, "from": my_name, "badge": badge,
-                                     "title": my_name, "body": "Новое сообщение"}, ttl=86400, urgency="high")
+            badge = cur.fetchone()["n"] + gchat.unread_total(cur, S, peer)
+            if not body.get("silent"):
+                send_push(cur, S, peer, {"type": "message", "chatId": chat_id, "from": my_name, "badge": badge,
+                                         "title": my_name, "body": "Новое сообщение"}, ttl=86400, urgency="high")
             return resp(200, {"id": r["id"], "at": r["created_at"]})
 
         if action == "poll":
@@ -373,15 +378,41 @@ def handler(event: dict, context) -> dict:
                     AND m.sender_id<>%s AND m.id = ANY(%s)""",
                     (me, me, me, ack),
                 )
+            gack = [int(x) for x in (body.get("gack") or [])[:500] if str(x).isdigit()]
             read_chat = int(body.get("readChat") or 0)
-            if read_chat and chat_access(cur, me, read_chat):
+            gchat.ack(cur, S, me, gack, -read_chat if read_chat < 0 else 0)
+            if read_chat > 0 and chat_access(cur, me, read_chat):
                 cur.execute(
                     f"""UPDATE {S}.messages SET read_at=NOW() WHERE chat_id=%s AND sender_id<>%s
                     AND read_at IS NULL AND delivered_at IS NOT NULL""",
                     (read_chat, me),
                 )
-            return resp(200, {"chats": list_chats(cur, me), "inbox": inbox(cur, me), "incoming": incoming_call(cur, me),
+            return resp(200, {"chats": list_chats(cur, me), "groups": gchat.list_groups(cur, S, me, ONLINE_SECONDS),
+                              "ginbox": gchat.inbox(cur, S, me),
+                              "inbox": inbox(cur, me), "incoming": incoming_call(cur, me),
                               "incomingGroup": group.incoming_group(cur, S, me)})
+
+        if action == "file_put":
+            raw = str(body.get("data") or "")
+            if not raw or len(raw) > 3_000_000:
+                return err(400, "Слишком большой фрагмент файла")
+            data = base64.b64decode(raw)
+            key = f"chatfiles/{uuid.uuid4().hex}.bin"
+            s3 = boto3.client("s3", endpoint_url="https://bucket.poehali.dev",
+                              aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                              aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"])
+            s3.put_object(Bucket="files", Key=key, Body=data, ContentType="application/octet-stream")
+            return resp(200, {"url": f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"})
+
+        if action.startswith("gchat_"):
+            def direct_unread(uid):
+                cur.execute(
+                    f"""SELECT COUNT(*) AS n FROM {S}.messages m JOIN {S}.chats c ON c.id=m.chat_id
+                    WHERE (c.user_a=%s OR c.user_b=%s) AND m.sender_id<>%s AND m.read_at IS NULL""",
+                    (uid, uid, uid),
+                )
+                return int(cur.fetchone()["n"])
+            return gchat.handle(action, body, cur, S, me, resp, err, ONLINE_SECONDS, direct_unread)
 
         if action.startswith("group_"):
             return group.handle(action, body, cur, S, me, resp, err)

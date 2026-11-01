@@ -11,9 +11,14 @@ import {
   type IncomingGroup,
   type GroupCallRecord,
   type InboxItem,
+  type GroupInboxItem,
   type Message,
   type User,
+  groupPeer,
 } from "@/lib/messenger-data";
+import { encodePayload, isSilentText, previewText, type Payload } from "@/lib/payload";
+import { compressImage, uploadEncrypted } from "@/lib/files";
+import GroupCreate from "./GroupCreate";
 import { loadIdentity, Vault, vaultKind, wipeVault, type E2E } from "@/lib/e2e";
 import AppHeader, { type Tab } from "./AppHeader";
 import ChatList from "./ChatList";
@@ -42,6 +47,8 @@ import {
 
 type PollResult = {
   chats: ChatItem[];
+  groups: ChatItem[];
+  ginbox: GroupInboxItem[];
   inbox: InboxItem[];
   incoming: IncomingCall | null;
   incomingGroup: IncomingGroup | null;
@@ -287,6 +294,7 @@ function MessengerApp({
   const seenCalls = useRef<Set<number>>(new Set());
   const pollingRef = useRef(false);
   const ackRef = useRef<number[]>([]);
+  const gackRef = useRef<number[]>([]);
   const pendingChatRef = useRef<number | null>(null);
   const historyRef = useRef<History>({});
   const saveChain = useRef<Promise<void>>(Promise.resolve());
@@ -425,10 +433,13 @@ function MessengerApp({
     pollingRef.current = true;
     const ack = ackRef.current;
     ackRef.current = [];
+    const gack = gackRef.current;
+    gackRef.current = [];
     const readChat = !document.hidden ? (activeRef.current ?? 0) : 0;
     try {
-      const res = await api<PollResult>("poll", { ack, readChat }, token);
-      setServerChats(res.chats);
+      const res = await api<PollResult>("poll", { ack, gack, readChat }, token);
+      const groups = (res.groups ?? []).map((g) => ({ ...g, peer: groupPeer(g.group!) }));
+      setServerChats([...res.chats, ...groups]);
       setChatsLoaded(true);
       flushOutbox(res.chats);
       const received: { chatId: number; msg: Message }[] = [];
@@ -441,9 +452,23 @@ function MessengerApp({
         }
         received.push({ chatId: item.chatId, msg: { id: item.id, mine: false, text, at: item.at, read: true } });
       }
-      if (received.length) {
-        await appendMessages(received);
+      const gReceived: { chatId: number; msg: Message }[] = [];
+      for (const item of res.ginbox ?? []) {
+        let text: string;
+        try {
+          text = await e2e.decrypt(item.senderKey, item.cipher, item.iv);
+        } catch {
+          text = "Не удалось расшифровать сообщение";
+        }
+        gReceived.push({
+          chatId: item.chatId,
+          msg: { id: item.id, mine: false, text, at: item.at, read: true, from: item.from },
+        });
+      }
+      if (received.length || gReceived.length) {
+        await appendMessages([...received, ...gReceived]);
         ackRef.current.push(...received.map((r) => r.msg.id));
+        gackRef.current.push(...gReceived.map((r) => r.msg.id));
       }
       const inc = res.incoming;
       const ig = res.incomingGroup;
@@ -457,6 +482,7 @@ function MessengerApp({
       }
     } catch (e) {
       ackRef.current.unshift(...ack);
+      gackRef.current.unshift(...gack);
       handleAuthError(e);
     } finally {
       pollingRef.current = false;
@@ -468,7 +494,7 @@ function MessengerApp({
     poll();
     let t: number;
     const loop = () => {
-      const delay = document.hidden ? 10000 : ackRef.current.length ? 600 : 3000;
+      const delay = document.hidden ? 10000 : ackRef.current.length || gackRef.current.length ? 600 : 3000;
       t = window.setTimeout(async () => {
         await poll();
         loop();
@@ -623,9 +649,17 @@ function MessengerApp({
   const chats = useMemo<ChatItem[]>(() => {
     return serverChats
       .map((c) => {
-        const list = [...(history[c.id] ?? []), ...(outbox[c.id] ?? [])];
+        const list = [...(history[c.id] ?? []), ...(outbox[c.id] ?? [])].filter((m) => !isSilentText(m.text));
         const last = list[list.length - 1];
-        return { ...c, lastText: last?.text ?? "", lastMine: last?.mine ?? false, lastAt: last?.at ?? c.lastAt };
+        const author =
+          c.group && last && !last.mine ? c.group.members.find((m) => m.id === last.from)?.name.split(" ")[0] : "";
+        const text = last ? previewText(last.text) : "";
+        return {
+          ...c,
+          lastText: author ? `${author}: ${text}` : text,
+          lastMine: last?.mine ?? false,
+          lastAt: last?.at ?? c.lastAt,
+        };
       })
       .sort((a, b) => (b.lastAt ?? "").localeCompare(a.lastAt ?? ""));
   }, [serverChats, history, outbox]);
@@ -691,9 +725,115 @@ function MessengerApp({
 
   const active = chats.find((c) => c.id === activeId);
 
+  const sendGroup = async (chat: ChatItem, text: string, silent: boolean) => {
+    const g = chat.group!;
+    const tempId = -Date.now();
+    if (!silent) {
+      const temp: Message = { id: tempId, mine: true, text, at: new Date().toISOString(), read: false };
+      setPending((p) => ({ ...p, [chat.id]: [...(p[chat.id] ?? []), temp] }));
+    }
+    try {
+      const items = [];
+      for (const m of g.members) {
+        if (m.id === me.id || !m.publicKey) continue;
+        const sealed = await e2e.encrypt(m.publicKey, text);
+        items.push({ userId: m.id, cipher: sealed.cipher, iv: sealed.iv });
+      }
+      const r = await api<{ id: number; at: string }>(
+        "gchat_send",
+        { gchatId: g.id, senderKey: e2e.pub, items, silent },
+        token,
+      );
+      await appendMessages([{ chatId: chat.id, msg: { id: r.id, mine: true, text, at: r.at, read: false, from: me.id } }]);
+    } catch (e) {
+      handleAuthError(e);
+      setSendError(e instanceof Error ? e.message : "Не удалось отправить");
+    } finally {
+      if (!silent) setPending((p) => ({ ...p, [chat.id]: (p[chat.id] ?? []).filter((m) => m.id !== tempId) }));
+    }
+  };
+
+  const sendPayload = async (payload: Payload) => {
+    const chat = chats.find((c) => c.id === activeRef.current);
+    if (!chat) return;
+    const text = encodePayload(payload);
+    const silent = isSilentText(text);
+    if (chat.group) return sendGroup(chat, text, silent);
+    if (!silent || !chat.peer.publicKey) return send(text);
+    try {
+      const fresh = chat.peer.publicKey;
+      const sealed = await e2e.encrypt(fresh, text);
+      const r = await api<{ id: number; at: string }>("send", { chatId: chat.id, ...sealed, silent: true }, token);
+      await appendMessages([{ chatId: chat.id, msg: { id: r.id, mine: true, text, at: r.at, read: true } }]);
+    } catch (e) {
+      handleAuthError(e);
+    }
+  };
+
+  const [uploading, setUploading] = useState<number | null>(null);
+
+  const sendFile = async (file: File, caption: string) => {
+    const chat = chats.find((c) => c.id === activeRef.current);
+    if (!chat) return;
+    if (!chat.group && !chat.peer.publicKey) {
+      setSendError(`${chat.peer.name} ещё не заходил(а) в RusAPP — файлы можно будет отправить после этого`);
+      return;
+    }
+    setSendError("");
+    setUploading(0);
+    try {
+      const isImage = file.type.startsWith("image/");
+      const prepared = isImage ? await compressImage(file) : { blob: file as Blob, w: 0, h: 0 };
+      const mime = isImage && prepared.blob !== file ? "image/jpeg" : file.type || "application/octet-stream";
+      const meta = await uploadEncrypted(prepared.blob, file.name, mime, token, (p) => setUploading(p));
+      if (prepared.w) {
+        meta.w = prepared.w;
+        meta.h = prepared.h;
+      }
+      if (caption) meta.caption = caption.slice(0, 1000);
+      await sendPayload(meta);
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : "Не удалось отправить файл");
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const [groupCreate, setGroupCreate] = useState(false);
+
+  const createGroup = async (title: string, users: User[]) => {
+    try {
+      const r = await api<{ chatId: number }>("gchat_create", { title, userIds: users.map((u) => u.id) }, token);
+      setGroupCreate(false);
+      pendingChatRef.current = r.chatId;
+      await poll();
+      return null;
+    } catch (e) {
+      handleAuthError(e);
+      return e instanceof Error ? e.message : "Не удалось создать группу";
+    }
+  };
+
+  const groupAction = async (action: string, body: Record<string, unknown>) => {
+    try {
+      await api(action, body, token);
+      if (action === "gchat_leave") {
+        activeRef.current = null;
+        setActiveId(null);
+        setMobileOpen(false);
+      }
+      await poll();
+      return null;
+    } catch (e) {
+      handleAuthError(e);
+      return e instanceof Error ? e.message : "Ошибка";
+    }
+  };
+
   const send = async (text: string) => {
     const chat = chats.find((c) => c.id === activeRef.current);
     if (!chat) return;
+    if (chat.group) return sendGroup(chat, text, false);
     const peerKey = chat.peer.publicKey;
     setSendError("");
     const chatId = chat.id;
@@ -813,17 +953,37 @@ function MessengerApp({
               loaded={chatsLoaded}
               onSelect={openChat}
               onNew={() => setTab("contacts")}
+              onNewGroup={() => {
+                loadContacts();
+                setGroupCreate(true);
+              }}
               className={cn(mobileOpen && active && "hidden lg:flex")}
             />
             {active ? (
               <ActiveChat
+                key={active.id}
                 peer={active.peer}
+                group={active.group}
+                me={me}
+                contacts={contacts}
+                uploading={uploading}
+                onSendPayload={sendPayload}
+                onSendFile={sendFile}
+                onGroupAction={groupAction}
+                onLoadContacts={loadContacts}
                 myKey={e2e.pub}
                 messages={activeMessages}
                 loading={!historyLoaded}
                 error={sendError}
                 onSend={send}
-                onCall={(k) => startCall(active.peer, k)}
+                onCall={(k) =>
+                  active.group
+                    ? startGroup(
+                        active.group.members.filter((m) => m.id !== me.id && m.publicKey).slice(0, MAX_GROUP - 1),
+                        k,
+                      )
+                    : startCall(active.peer, k)
+                }
                 onBack={() => setMobileOpen(false)}
                 className={cn(!mobileOpen && "hidden lg:grid")}
               />
@@ -878,6 +1038,9 @@ function MessengerApp({
           />
         )}
       </main>
+      {groupCreate && (
+        <GroupCreate contacts={contacts} onCancel={() => setGroupCreate(false)} onCreate={createGroup} />
+      )}
       {groupPicker && (
         <ContactPicker
           title="Групповой звонок"

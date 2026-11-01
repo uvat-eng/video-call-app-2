@@ -16,15 +16,34 @@ export type User = {
   publicKey?: string | null;
 };
 
+export type GroupMemberInfo = User & { admin: boolean };
+
+export type GroupInfo = { id: number; title: string; members: GroupMemberInfo[]; admin: boolean };
+
 export type ChatItem = {
   id: number;
   peer: User;
+  group?: GroupInfo;
   lastAt: string | null;
   unread: number;
   readUpto: number;
   lastText?: string;
   lastMine?: boolean;
 };
+
+export type GroupInboxItem = {
+  id: number;
+  chatId: number;
+  from: number;
+  cipher: string;
+  iv: string;
+  senderKey: string;
+  at: string;
+};
+
+export function groupPeer(g: GroupInfo): User {
+  return { id: -g.id, name: g.title, phone: "", status: "", online: false, publicKey: null };
+}
 
 export type InboxItem = {
   id: number;
@@ -41,6 +60,7 @@ export type Message = {
   text: string;
   at: string;
   read: boolean;
+  from?: number;
 };
 
 export type CallRecord = {
