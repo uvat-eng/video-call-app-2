@@ -4,6 +4,7 @@ import { api } from "@/lib/messenger-data";
 import { linkKeypair, type LinkBundle } from "@/lib/e2e";
 import { deviceName } from "@/lib/appearance";
 import { LOGO_URL } from "./AppHeader";
+import QRCode from "qrcode";
 
 type Props = {
   token: string;
@@ -20,6 +21,14 @@ export default function LinkScreen({ token, name, onLinked, onFresh, onLogout }:
   const [confirmFresh, setConfirmFresh] = useState(false);
   const kpRef = useRef<Awaited<ReturnType<typeof linkKeypair>> | null>(null);
   const doneRef = useRef(false);
+  const [qr, setQr] = useState("");
+
+  useEffect(() => {
+    if (!code) return;
+    QRCode.toDataURL(`${window.location.origin}/?link=${code}`, { margin: 1, width: 440, errorCorrectionLevel: "M" })
+      .then(setQr)
+      .catch(() => setQr(""));
+  }, [code]);
 
   const start = async () => {
     setState("loading");
@@ -73,7 +82,8 @@ export default function LinkScreen({ token, name, onLinked, onFresh, onLogout }:
         <h1 className="text-[1.6em] font-semibold tracking-[-0.03em]">Подключите это устройство</h1>
         <p className="text-[.92em] text-muted-foreground">
           {name.split(" ")[0]}, ваш аккаунт уже открыт на другом устройстве. Чтобы перенести сюда переписку и ключи
-          шифрования, откройте RuChat на телефоне: <b>Настройки → Связанные устройства</b> и введите код:
+          шифрования, откройте RuChat на телефоне: <b>Настройки → Связанные устройства → Сканировать QR-код</b>. Или
+          просто наведите на код камеру телефона.
         </p>
         <div className="grid place-items-center rounded-[14px] bg-gradient-to-br from-tile-a to-tile-b py-6">
           {state === "loading" || state === "linking" ? (
@@ -86,9 +96,13 @@ export default function LinkScreen({ token, name, onLinked, onFresh, onLogout }:
               Получить код ещё раз
             </button>
           ) : (
-            <span className="font-head text-[2.2em] font-semibold tracking-[0.18em] tabular-nums">
-              {code.slice(0, 4)} {code.slice(4)}
-            </span>
+            <div className="flex flex-col items-center gap-3">
+              {qr && <img src={qr} alt="QR-код для подключения" className="h-[220px] w-[220px] rounded-xl bg-white p-2" />}
+              <span className="text-[.8em] text-muted-foreground">или введите код вручную</span>
+              <span className="font-head text-[1.6em] font-semibold tracking-[0.18em] tabular-nums">
+                {code.slice(0, 4)} {code.slice(4)}
+              </span>
+            </div>
           )}
         </div>
         {state === "waiting" && (

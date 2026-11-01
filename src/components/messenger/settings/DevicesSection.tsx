@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { api, longTime } from "@/lib/messenger-data";
+import QrScanner from "./QrScanner";
 
 type Device = { id: number; name: string; createdAt: string; lastActive: string; current: boolean };
 
 type Props = {
   token: string;
   onApprove: (code: string) => Promise<string | null>;
+  initialCode?: string;
 };
 
 function deviceIcon(name: string) {
@@ -15,12 +17,13 @@ function deviceIcon(name: string) {
   return "Monitor";
 }
 
-export default function DevicesSection({ token, onApprove }: Props) {
+export default function DevicesSection({ token, onApprove, initialCode }: Props) {
   const [devices, setDevices] = useState<Device[] | null>(null);
   const [code, setCode] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<number | null>(null);
+  const [scan, setScan] = useState(false);
 
   const load = () =>
     api<{ devices: Device[] }>("devices", {}, token)
@@ -29,13 +32,21 @@ export default function DevicesSection({ token, onApprove }: Props) {
 
   useEffect(() => {
     load();
+    if (initialCode) {
+      setCode(initialCode);
+      run(initialCode);
+    }
   }, []);
 
   const approve = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg("");
+    run(code);
+  };
+
+  const run = async (value: string) => {
+    setMsg("Подключаю устройство…");
     setBusy(true);
-    const err = await onApprove(code);
+    const err = await onApprove(value);
     setBusy(false);
     if (err) setMsg(err);
     else {
@@ -60,10 +71,20 @@ export default function DevicesSection({ token, onApprove }: Props) {
         </div>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-[.9em] text-muted-foreground">
           <li>Откройте RuChat на компьютере или другом телефоне и войдите в этот же аккаунт.</li>
-          <li>На новом устройстве появится код из 8 символов.</li>
-          <li>Введите его здесь — переписка и ключи шифрования зашифрованно перенесутся туда.</li>
+          <li>На новом устройстве появится QR-код.</li>
+          <li>Отсканируйте его — переписка и ключи шифрования зашифрованно перенесутся туда.</li>
         </ol>
-        <form onSubmit={approve} className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setScan(true)}
+          className="mt-4 inline-flex h-12 items-center gap-2 rounded-full bg-primary px-6 font-head font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          <Icon name="ScanLine" size={18} />
+          Сканировать QR-код
+        </button>
+        <div className="mt-3 text-[.8em] text-muted-foreground">или введите код вручную:</div>
+        <form onSubmit={approve} className="mt-2 flex flex-wrap gap-2">
           <input
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8))}
@@ -72,7 +93,7 @@ export default function DevicesSection({ token, onApprove }: Props) {
           />
           <button
             disabled={code.length < 8 || busy}
-            className="inline-flex h-11 items-center gap-2 rounded-full bg-primary px-5 font-head font-semibold text-primary-foreground disabled:opacity-60"
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-secondary px-5 font-head font-semibold text-secondary-foreground disabled:opacity-60"
           >
             {busy && <Icon name="Loader2" size={16} className="animate-spin" />}
             Подключить
@@ -80,6 +101,17 @@ export default function DevicesSection({ token, onApprove }: Props) {
         </form>
         {msg && <p className="mt-2 text-[.87em]">{msg}</p>}
       </div>
+
+      {scan && (
+        <QrScanner
+          onClose={() => setScan(false)}
+          onCode={(c) => {
+            setScan(false);
+            setCode(c);
+            run(c);
+          }}
+        />
+      )}
 
       <div className="mb-2 mt-6 font-head font-semibold">Где выполнен вход</div>
       {devices === null && <Icon name="Loader2" size={20} className="animate-spin text-muted-foreground" />}

@@ -19,6 +19,7 @@ type Props = {
   onClearHistory: () => Promise<void>;
   onTestPush?: () => Promise<string>;
   onApproveDevice: (code: string) => Promise<string | null>;
+  linkCode?: string;
   backup: React.ComponentProps<typeof BackupSection>;
   look: Look;
   onLook: (look: Look) => void;
@@ -38,7 +39,7 @@ const SECTIONS: [Section, string, string, string][] = [
 
 export default function SettingsView(props: Props) {
   const { user, onLogout } = props;
-  const [section, setSection] = useState<Section | null>(null);
+  const [section, setSection] = useState<Section | null>(props.linkCode ? "devices" : null);
   const current = SECTIONS.find((s) => s[0] === section);
 
   return (
@@ -96,7 +97,7 @@ export default function SettingsView(props: Props) {
         {!section && <p className="text-muted-foreground">Выберите раздел слева.</p>}
         {section === "profile" && <ProfileSection user={user} onSave={props.onSave} onAvatar={props.onAvatar} />}
         {section === "appearance" && <AppearanceSection look={props.look} onChange={props.onLook} />}
-        {section === "devices" && <DevicesSection token={props.token} onApprove={props.onApproveDevice} />}
+        {section === "devices" && <DevicesSection token={props.token} onApprove={props.onApproveDevice} initialCode={props.linkCode} />}
         {section === "backup" && <BackupSection {...props.backup} />}
         {section === "privacy" && <PrivacySection {...props} />}
         {section === "notifications" && <NotificationsSection onTestPush={props.onTestPush} />}

@@ -347,6 +347,7 @@ function MessengerApp({
   const syncingGroups = useRef<Set<number>>(new Set());
   const sharing = useRef<Set<string>>(new Set());
   const pendingChatRef = useRef<number | null>(null);
+  const [linkCode, setLinkCode] = useState("");
   const historyRef = useRef<History>({});
   const saveChain = useRef<Promise<void>>(Promise.resolve());
 
@@ -749,6 +750,12 @@ function MessengerApp({
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const link = (params.get("link") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (link.length === 8) {
+      window.history.replaceState(null, "", "/");
+      setLinkCode(link);
+      setTab("settings");
+    }
     const callId = Number(params.get("call") || 0);
     const chatId = Number(params.get("chat") || 0);
     if (callId || chatId) window.history.replaceState(null, "", "/");
@@ -1299,6 +1306,7 @@ function MessengerApp({
             look={look}
             onLook={changeLook}
             backup={backup}
+            linkCode={linkCode}
             onSave={saveProfile}
             onLogout={onLogout}
             onClearHistory={clearHistory}
