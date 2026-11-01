@@ -133,9 +133,7 @@ def purge_delivered(cur, me):
     cur.execute(
         f"""UPDATE {S}.messages m SET cipher=NULL, iv=NULL, sender_key=NULL
         FROM {S}.chats c WHERE c.id=m.chat_id AND (c.user_a=%s OR c.user_b=%s) AND m.cipher IS NOT NULL
-        AND (m.created_at < NOW() - INTERVAL '30 days' OR m.id <= (
-          SELECT COALESCE(MIN(x.msg_cursor), 0) FROM {S}.sessions x
-          WHERE x.user_id IN (c.user_a, c.user_b) AND x.last_active > NOW() - INTERVAL '14 days'))""",
+        AND m.created_at < NOW() - INTERVAL '30 days'""",
         (me, me),
     )
 
@@ -223,7 +221,7 @@ def handler(event: dict, context) -> dict:
             tok = secrets.token_hex(32)
             cur.execute(
                 f"INSERT INTO {S}.sessions (token, user_id, device_name, msg_cursor) VALUES (%s,%s,%s,%s)",
-                (th(tok), u["id"], device_label(body), max_msg_id(cur, u["id"])),
+                (th(tok), u["id"], device_label(body), 0),
             )
             u["online"] = True
             return resp(200, {"token": tok, "user": {**user_out(u), "hasKeyBackup": bool(u.get("key_backup"))}, "keyBackup": u.get("key_backup")})
