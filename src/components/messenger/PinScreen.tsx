@@ -1,0 +1,108 @@
+import { useState } from "react";
+import Icon from "@/components/ui/icon";
+import { LOGO_URL } from "./AppHeader";
+
+type Props = {
+  mode: "create" | "unlock";
+  name: string;
+  onSubmit: (pin: string) => Promise<string | null>;
+  onReset: () => void;
+  onLogout: () => void;
+};
+
+export default function PinScreen({ mode, name, onSubmit, onReset, onLogout }: Props) {
+  const [pin, setPin] = useState("");
+  const [pin2, setPin2] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (pin.length < 6) return setError("Код — минимум 6 символов");
+    if (mode === "create" && pin !== pin2) return setError("Коды не совпадают");
+    setBusy(true);
+    const err = await onSubmit(pin);
+    setBusy(false);
+    if (err) {
+      setError(err);
+      setPin("");
+    }
+  };
+
+  const field =
+    "h-12 w-full rounded-full bg-background px-5 text-center font-head text-[1.15em] tracking-[0.3em] outline-none placeholder:tracking-normal placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/20";
+
+  return (
+    <div className="app-text grid min-h-[100dvh] place-items-center bg-background p-2.5">
+      <form onSubmit={submit} className="flex w-full max-w-[420px] flex-col gap-3 rounded-[14px] bg-card p-7">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="rounded-lg bg-logo-bg px-1 py-0.5">
+            <img src={LOGO_URL} alt="RusAPP" className="h-8 w-auto" />
+          </span>
+          <span className="flex items-center gap-1.5 rounded-full bg-gradient-to-br from-tile-a to-tile-b px-3 py-1 text-[.8em] font-medium">
+            <Icon name="ShieldCheck" size={14} />
+            Сквозное шифрование
+          </span>
+        </div>
+        <h1 className="text-[1.6em] font-semibold tracking-[-0.03em]">
+          {mode === "create" ? "Защитите переписку" : `С возвращением, ${name.split(" ")[0]}`}
+        </h1>
+        <p className="text-[.9em] text-muted-foreground">
+          {mode === "create"
+            ? "Придумайте код доступа. Им шифруются ваши ключи и история на этом устройстве. Код нигде не хранится, восстановить его нельзя."
+            : "Введите код доступа, чтобы открыть зашифрованное хранилище на этом устройстве."}
+        </p>
+        <input
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          autoComplete="off"
+          placeholder="Код доступа"
+          className={field}
+        />
+        {mode === "create" && (
+          <input
+            value={pin2}
+            onChange={(e) => setPin2(e.target.value)}
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="Повторите код"
+            className={field}
+          />
+        )}
+        {error && <p className="px-2 text-center text-[.87em] text-destructive">{error}</p>}
+        <button
+          type="submit"
+          disabled={busy}
+          className="mt-1 inline-flex h-12 items-center justify-center gap-2 rounded-full bg-primary font-head font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          <Icon name={busy ? "Loader2" : mode === "create" ? "Lock" : "Unlock"} size={16} className={busy ? "animate-spin" : ""} />
+          {mode === "create" ? "Создать хранилище" : "Открыть"}
+        </button>
+        <div className="mt-2 flex flex-wrap justify-between gap-2 text-[.8em] text-muted-foreground">
+          {mode === "unlock" &&
+            (confirmReset ? (
+              <span>
+                Вся история на устройстве будет удалена.{" "}
+                <button type="button" onClick={onReset} className="font-medium text-destructive hover:underline">
+                  Сбросить
+                </button>
+              </span>
+            ) : (
+              <button type="button" onClick={() => setConfirmReset(true)} className="hover:text-foreground">
+                Забыли код?
+              </button>
+            ))}
+          <button type="button" onClick={onLogout} className="ml-auto hover:text-foreground">
+            Выйти из аккаунта
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

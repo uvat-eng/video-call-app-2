@@ -1,0 +1,13 @@
+ALTER TABLE t_p46289391_video_call_app_2.users ADD COLUMN public_key TEXT;
+ALTER TABLE t_p46289391_video_call_app_2.messages ADD COLUMN cipher TEXT;
+ALTER TABLE t_p46289391_video_call_app_2.messages ADD COLUMN iv VARCHAR(32);
+ALTER TABLE t_p46289391_video_call_app_2.messages ADD COLUMN sender_key TEXT;
+ALTER TABLE t_p46289391_video_call_app_2.messages ADD COLUMN recipient_key TEXT;
+ALTER TABLE t_p46289391_video_call_app_2.messages ADD COLUMN delivered_at TIMESTAMPTZ;
+ALTER TABLE t_p46289391_video_call_app_2.messages ALTER COLUMN text SET DEFAULT '';
+UPDATE t_p46289391_video_call_app_2.messages SET text = '', delivered_at = NOW();
+UPDATE t_p46289391_video_call_app_2.calls SET offer = NULL, answer = NULL;
+ALTER TABLE t_p46289391_video_call_app_2.sessions ADD COLUMN token_hash VARCHAR(64);
+UPDATE t_p46289391_video_call_app_2.sessions SET token_hash = encode(sha256(token::bytea), 'hex');
+CREATE INDEX idx_sessions_hash ON t_p46289391_video_call_app_2.sessions(token_hash);
+CREATE INDEX idx_messages_undelivered ON t_p46289391_video_call_app_2.messages(chat_id) WHERE delivered_at IS NULL;

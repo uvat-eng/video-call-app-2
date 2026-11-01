@@ -1,0 +1,1 @@
+UPDATE t_p46289391_video_call_app_2.sessions SET token = token_hash WHERE token_hash IS NOT NULL;
