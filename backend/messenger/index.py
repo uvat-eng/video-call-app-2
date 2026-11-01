@@ -9,6 +9,7 @@ import group
 import gchat
 import base64
 import uuid
+import datetime
 import boto3
 
 S = "t_p46289391_video_call_app_2"
@@ -133,7 +134,7 @@ def purge_delivered(cur, me):
     cur.execute(
         f"""UPDATE {S}.messages m SET cipher=NULL, iv=NULL, sender_key=NULL
         FROM {S}.chats c WHERE c.id=m.chat_id AND (c.user_a=%s OR c.user_b=%s) AND m.cipher IS NOT NULL
-        AND m.created_at < NOW() - INTERVAL '30 days'""",
+        AND m.created_at < NOW() - INTERVAL '365 days'""",
         (me, me),
     )
 
@@ -375,6 +376,21 @@ def handler(event: dict, context) -> dict:
                     }, ttl=2419200, urgency="high")
                 cur.execute(f"DELETE FROM {S}.key_waits WHERE recipient_id=%s", (me,))
             return resp(200, {"ok": True})
+
+        if action == "history_put":
+            url = str(body.get("url") or "")
+            meta = str(body.get("meta") or "")
+            prefix = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/chatfiles/"
+            if not url.startswith(prefix) or len(meta) > 4000:
+                return err(400, "Некорректные данные")
+            cur.execute(f"UPDATE {S}.users SET history_backup=%s WHERE id=%s",
+                        (json.dumps({"url": url, "meta": meta, "at": datetime.datetime.utcnow().isoformat()}), me))
+            return resp(200, {"ok": True})
+
+        if action == "history_get":
+            cur.execute(f"SELECT history_backup FROM {S}.users WHERE id=%s", (me,))
+            r = cur.fetchone()
+            return resp(200, {"backup": json.loads(r["history_backup"]) if r and r["history_backup"] else None})
 
         if action == "key_backup":
             blob = str(body.get("backup") or "")

@@ -1,0 +1,1 @@
+ALTER TABLE t_p46289391_video_call_app_2.users ADD COLUMN history_backup TEXT;

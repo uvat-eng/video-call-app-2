@@ -3,6 +3,7 @@ import { api, ApiError, type CallKind, type CallRecord, type ChatItem, type Inco
 import { isSilentText, previewText } from "@/lib/payload";
 import { setMediaVault } from "@/lib/files";
 import { groupDecrypt, type E2E } from "@/lib/e2e";
+import { downloadHistory, uploadHistory } from "@/lib/history-sync";
 import { type Tab } from "../AppHeader";
 import { type ActiveCall } from "../CallScreen";
 import { type ActiveGroup } from "../GroupCallScreen";
@@ -113,13 +114,89 @@ export function useMessengerCore({
     saveChain.current = saveChain.current.then(() => e2e.vault.set("groupKeys", obj)).catch(() => undefined);
   }, [e2e]);
 
+  const historyDirty = useRef(false);
+  const uploadTimer = useRef<number | null>(null);
+  const uploadingHistory = useRef(false);
+
+  const flushHistory = useCallback(async () => {
+    if (!historyDirty.current || uploadingHistory.current) return;
+    uploadingHistory.current = true;
+    historyDirty.current = false;
+    try {
+      await saveChain.current;
+      await uploadHistory(e2e.vault, token);
+    } catch {
+      historyDirty.current = true;
+    } finally {
+      uploadingHistory.current = false;
+    }
+  }, [e2e, token]);
+
+  const markHistoryDirty = useCallback(() => {
+    historyDirty.current = true;
+    if (uploadTimer.current) return;
+    uploadTimer.current = window.setTimeout(() => {
+      uploadTimer.current = null;
+      flushHistory();
+    }, 3 * 60 * 1000);
+  }, [flushHistory]);
+
   useEffect(() => {
-    reloadVault()
+    const onHide = () => {
+      if (document.visibilityState === "hidden") flushHistory();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      if (uploadTimer.current) window.clearTimeout(uploadTimer.current);
+      uploadTimer.current = null;
+    };
+  }, [flushHistory]);
+
+  useEffect(() => {
+    const restore = async () => {
+      const local = await e2e.vault.get<History>("history").catch(() => null);
+      const snap = await downloadHistory(e2e.vault, token).catch(() => null);
+      if (!snap) {
+        if (local && Object.keys(local).length) markHistoryDirty();
+        return;
+      }
+      const remote = (snap.history ?? {}) as History;
+      const merged: History = { ...(local ?? {}) };
+      let changed = false;
+      for (const [cid, list] of Object.entries(remote)) {
+        const id = Number(cid);
+        const cur = merged[id] ? [...merged[id]] : [];
+        const seen = new Set(cur.map((m) => m.id));
+        for (const m of list) {
+          if (!seen.has(m.id)) {
+            cur.push(m);
+            changed = true;
+          }
+        }
+        cur.sort((a, b) => a.id - b.id);
+        merged[id] = cur.slice(-HISTORY_LIMIT);
+      }
+      if (changed) await e2e.vault.set("history", merged);
+      const gk = (snap.groupKeys ?? {}) as Record<number, string>;
+      const localGk = (await e2e.vault.get<Record<number, string>>("groupKeys").catch(() => null)) ?? {};
+      const gkMerged = { ...gk, ...localGk };
+      if (Object.keys(gkMerged).length !== Object.keys(localGk).length) {
+        await e2e.vault.set("groupKeys", gkMerged);
+        for (const [k, v] of Object.entries(gkMerged)) if (!groupKeys.current.has(Number(k))) groupKeys.current.set(Number(k), v);
+      }
+      const remoteIds = new Set(Object.values(remote).flatMap((l) => l.map((m) => `${m.id}`)));
+      if (Object.values(local ?? {}).some((l) => l.some((m) => !remoteIds.has(`${m.id}`)))) historyDirty.current = true;
+      if (historyDirty.current) markHistoryDirty();
+    };
+    restore()
+      .catch(() => undefined)
+      .then(() => reloadVault())
       .then((o) => {
         for (const id of Object.keys(o)) api("wait_key", { chatId: Number(id) }, token).catch(() => null);
       })
       .finally(() => setHistoryLoaded(true));
-  }, [reloadVault, token]);
+  }, [reloadVault, token, e2e]);
 
   const saveOutbox = useCallback(
     (next: Record<number, Message[]>) => {
@@ -171,9 +248,10 @@ export function useMessengerCore({
       historyRef.current = next;
       setHistory(next);
       saveChain.current = saveChain.current.then(() => e2e.vault.set("history", next)).catch(() => undefined);
+      markHistoryDirty();
       return saveChain.current;
     },
-    [e2e],
+    [e2e, markHistoryDirty],
   );
 
   const appendMessages = useCallback(

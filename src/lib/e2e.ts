@@ -344,6 +344,19 @@ export async function importIdentity(vault: Vault, id: Identity) {
   await vault.set("identity", id);
 }
 
+export async function historyKey(vault: Vault) {
+  const id = await vault.get<Identity>("identity");
+  if (!id) return null;
+  const hk = await crypto.subtle.importKey("raw", unb64(id.pkcs8), "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: enc.encode("rusapp-history-v1") },
+    hk,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
 const KEY_BACKUP_ITER = 310000;
 
 function backupSecret(password: string, userId: number) {
