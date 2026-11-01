@@ -1,26 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
-import type { CallKind, Chat, Contact } from "@/lib/messenger-data";
+import { hhmm, presence, type CallKind, type Message, type User } from "@/lib/messenger-data";
 
 type Props = {
-  chat: Chat;
-  contact: Contact;
-  typing: boolean;
+  peer: User;
+  messages: Message[];
+  loading: boolean;
   onSend: (text: string) => void;
   onCall: (kind: CallKind) => void;
   onBack?: () => void;
   className?: string;
 };
 
-export default function ActiveChat({ chat, contact, typing, onSend, onCall, onBack, className }: Props) {
+export default function ActiveChat({ peer, messages, loading, onSend, onCall, onBack, className }: Props) {
   const [text, setText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastId = messages[messages.length - 1]?.id;
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [chat.messages.length, chat.id, typing]);
+  }, [lastId, peer.id]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,7 +33,6 @@ export default function ActiveChat({ chat, contact, typing, onSend, onCall, onBa
 
   return (
     <section className={cn("grid min-h-0 grid-rows-[auto_1fr_auto] gap-2.5", className)}>
-      {/* Шапка чата */}
       <div className="grid grid-cols-[auto_1fr] items-end gap-3 overflow-hidden rounded-[14px] bg-card px-5 py-5 sm:grid-cols-[auto_1fr_auto] lg:px-7 lg:py-[26px]">
         <span className="self-center">
           {onBack && (
@@ -42,11 +42,8 @@ export default function ActiveChat({ chat, contact, typing, onSend, onCall, onBa
           )}
         </span>
         <div className="min-w-0">
-          <h1 className="hero-title truncate">{contact.name}</h1>
-          <p className="mt-2 truncate text-muted-foreground">
-            {typing ? <span className="text-online">печатает…</span> : contact.lastSeen}
-            {!typing && chat.contactId === "mk" && " · последний звонок сегодня, 14:20"}
-          </p>
+          <h1 className="hero-title truncate">{peer.name}</h1>
+          <p className={cn("mt-2 truncate", peer.online ? "text-online" : "text-muted-foreground")}>{presence(peer)}</p>
         </div>
         <div className="col-span-2 flex flex-row items-start gap-2 sm:col-span-1 sm:flex-col">
           <button
@@ -65,73 +62,38 @@ export default function ActiveChat({ chat, contact, typing, onSend, onCall, onBa
         </div>
       </div>
 
-      {/* Лента + плитка звонка */}
-      <div className={cn("grid min-h-0 gap-2.5", chat.scheduled ? "md:grid-cols-[1fr_300px]" : "grid-cols-1")}>
-        <div
-          ref={scrollRef}
-          className="scroll-thin flex min-h-0 flex-col gap-2 overflow-y-auto rounded-[14px] bg-card px-6 py-[22px]"
-        >
-          <div className="mt-auto" />
-          {chat.messages.map((m) => (
-            <div
-              key={m.id}
-              className={cn(
-                "max-w-[78%] animate-msg-in rounded-2xl px-3.5 py-2.5 leading-[1.4] md:max-w-[62%]",
-                m.from === "me" ? "self-end bg-accent text-accent-foreground" : "self-start bg-background",
-              )}
-            >
-              {m.author && <div className="mb-0.5 text-[.75em] font-medium text-primary">{m.author}</div>}
-              {m.text}
-              <small className="mt-0.5 flex items-center justify-end gap-1 text-[.75em] opacity-60">
-                {m.time}
-                {m.from === "me" && <Icon name={m.read ? "CheckCheck" : "Check"} size={14} />}
-              </small>
-            </div>
-          ))}
-          {typing && (
-            <div className="flex gap-1 self-start rounded-2xl bg-background px-4 py-3.5">
-              {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground"
-                  style={{ animationDelay: `${i * 0.15}s` }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {chat.scheduled && (
-          <div className="hidden flex-col justify-between rounded-[14px] bg-gradient-to-br from-tile-a to-tile-b p-[18px] md:flex">
-            <div className="flex items-center justify-between font-head font-semibold">
-              <span className="flex items-center gap-1.5">
-                <Icon name={chat.scheduled.kind === "video" ? "Video" : "Phone"} size={16} />
-                {chat.scheduled.kind === "video" ? "Видео" : "Аудио"}
-              </span>
-              <span className="rounded-md bg-card px-2 py-[3px] font-body text-[.8em] font-medium">HD</span>
-            </div>
-            <div>
-              <div className="font-head text-[2.6em] font-semibold leading-none tracking-[-0.04em]">
-                {chat.scheduled.time}
-              </div>
-              <p className="mt-1.5 text-muted-foreground">Запланирован звонок</p>
-              <button
-                onClick={() => onCall(chat.scheduled!.kind)}
-                className="mt-4 inline-flex h-9 items-center gap-2 rounded-full bg-card px-4 text-[.85em] font-medium transition-colors hover:bg-background"
-              >
-                <Icon name="PhoneForwarded" size={14} />
-                Начать сейчас
-              </button>
-            </div>
+      <div
+        ref={scrollRef}
+        className="scroll-thin flex min-h-0 flex-col gap-2 overflow-y-auto rounded-[14px] bg-card px-6 py-[22px]"
+      >
+        <div className="mt-auto" />
+        {loading && messages.length === 0 && (
+          <div className="grid place-items-center py-6 text-muted-foreground">
+            <Icon name="Loader2" size={20} className="animate-spin" />
           </div>
         )}
+        {!loading && messages.length === 0 && (
+          <p className="py-6 text-center text-muted-foreground">Напишите первое сообщение — {peer.name} увидит его сразу</p>
+        )}
+        {messages.map((m) => (
+          <div
+            key={m.id}
+            className={cn(
+              "max-w-[78%] animate-msg-in whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 leading-[1.4] md:max-w-[62%]",
+              m.mine ? "self-end bg-accent text-accent-foreground" : "self-start bg-background",
+              m.id < 0 && "opacity-70",
+            )}
+          >
+            {m.text}
+            <small className="mt-0.5 flex items-center justify-end gap-1 text-[.75em] opacity-60">
+              {hhmm(m.at)}
+              {m.mine && <Icon name={m.id < 0 ? "Clock" : m.read ? "CheckCheck" : "Check"} size={14} />}
+            </small>
+          </div>
+        ))}
       </div>
 
-      {/* Поле ввода */}
       <form onSubmit={submit} className="flex items-center gap-2.5 rounded-[14px] bg-card p-2.5">
-        <button type="button" className="hidden rounded-full p-2.5 text-muted-foreground hover:bg-background sm:block" aria-label="Прикрепить">
-          <Icon name="Paperclip" size={18} />
-        </button>
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}

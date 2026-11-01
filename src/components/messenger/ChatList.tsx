@@ -1,41 +1,49 @@
 import { useMemo, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
-import type { Chat, Contact } from "@/lib/messenger-data";
+import { shortTime, type ChatItem } from "@/lib/messenger-data";
 import UserAvatar from "./UserAvatar";
 
 type Props = {
-  chats: Chat[];
-  contacts: Record<string, Contact>;
-  activeId: string;
-  onSelect: (id: string) => void;
+  chats: ChatItem[];
+  activeId: number | null;
+  loaded: boolean;
+  onSelect: (id: number) => void;
+  onNew: () => void;
   className?: string;
 };
 
-type Filter = "all" | "unread" | "groups";
+type Filter = "all" | "unread";
 
-export default function ChatList({ chats, contacts, activeId, onSelect, className }: Props) {
+export default function ChatList({ chats, activeId, loaded, onSelect, onNew, className }: Props) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return chats.filter((c) => {
-      const name = contacts[c.contactId]?.name.toLowerCase() ?? "";
-      if (q && !name.includes(q) && !c.preview.toLowerCase().includes(q)) return false;
+      if (q && !c.peer.name.toLowerCase().includes(q) && !c.lastText.toLowerCase().includes(q)) return false;
       if (filter === "unread" && c.unread === 0) return false;
-      if (filter === "groups" && !c.isGroup) return false;
       return true;
     });
-  }, [chats, contacts, query, filter]);
+  }, [chats, query, filter]);
 
   const totalUnread = chats.reduce((s, c) => s + c.unread, 0);
 
   return (
     <aside className={cn("flex min-h-0 flex-col overflow-hidden rounded-[14px] bg-card px-2.5 py-[18px]", className)}>
-      <div className="flex items-baseline justify-between px-2.5 pb-3">
+      <div className="flex items-center justify-between px-2.5 pb-3">
         <h2 className="text-[1.6em] font-semibold tracking-[-0.03em]">Чаты</h2>
-        {totalUnread > 0 && <span className="text-[.8em] text-muted-foreground">{totalUnread} новых</span>}
+        <div className="flex items-center gap-2">
+          {totalUnread > 0 && <span className="text-[.8em] text-muted-foreground">{totalUnread} новых</span>}
+          <button
+            onClick={onNew}
+            aria-label="Новый чат"
+            className="grid h-9 w-9 place-items-center rounded-full bg-primary text-primary-foreground transition-transform hover:scale-105"
+          >
+            <Icon name="Plus" size={16} />
+          </button>
+        </div>
       </div>
       <label className="mx-2.5 mb-2.5 flex h-[38px] items-center gap-2 rounded-full bg-background px-4 text-[.93em] text-muted-foreground">
         <Icon name="Search" size={16} />
@@ -56,7 +64,6 @@ export default function ChatList({ chats, contacts, activeId, onSelect, classNam
           [
             ["all", "Все"],
             ["unread", "Непрочитанные"],
-            ["groups", "Группы"],
           ] as [Filter, string][]
         ).map(([id, label]) => (
           <button
@@ -72,38 +79,50 @@ export default function ChatList({ chats, contacts, activeId, onSelect, classNam
         ))}
       </div>
       <div className="scroll-thin -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
-        {visible.length === 0 && (
+        {!loaded && (
+          <div className="grid place-items-center py-10 text-muted-foreground">
+            <Icon name="Loader2" size={20} className="animate-spin" />
+          </div>
+        )}
+        {loaded && chats.length === 0 && (
+          <div className="px-2.5 py-8 text-center text-[.87em] text-muted-foreground">
+            Пока нет чатов.
+            <br />
+            <button onClick={onNew} className="mt-2 font-medium text-primary underline-offset-2 hover:underline">
+              Найти человека по номеру
+            </button>
+          </div>
+        )}
+        {loaded && chats.length > 0 && visible.length === 0 && (
           <p className="px-2.5 py-8 text-center text-[.87em] text-muted-foreground">Ничего не найдено</p>
         )}
-        {visible.map((c) => {
-          const contact = contacts[c.contactId];
-          if (!contact) return null;
-          return (
-            <button
-              key={c.id}
-              onClick={() => onSelect(c.id)}
-              className={cn(
-                "grid w-full grid-cols-[42px_1fr_auto] items-center gap-3 rounded-xl p-2.5 text-left transition-colors",
-                c.id === activeId ? "bg-background" : "hover:bg-background/60",
+        {visible.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => onSelect(c.id)}
+            className={cn(
+              "grid w-full grid-cols-[42px_1fr_auto] items-center gap-3 rounded-xl p-2.5 text-left transition-colors",
+              c.id === activeId ? "bg-background" : "hover:bg-background/60",
+            )}
+          >
+            <UserAvatar user={c.peer} />
+            <div className="min-w-0">
+              <div className="truncate font-medium">{c.peer.name}</div>
+              <div className="truncate text-[.87em] text-muted-foreground">
+                {c.lastText ? `${c.lastMine ? "Вы: " : ""}${c.lastText}` : "Новый чат"}
+              </div>
+            </div>
+            <div className="text-right text-[.8em] text-muted-foreground">
+              {shortTime(c.lastAt)}
+              <br />
+              {c.unread > 0 && (
+                <span className="mt-1 inline-block h-5 min-w-5 rounded-full bg-accent px-1.5 text-center text-[.9em] font-medium leading-5 text-accent-foreground">
+                  {c.unread}
+                </span>
               )}
-            >
-              <UserAvatar contact={contact} />
-              <div className="min-w-0">
-                <div className="truncate font-medium">{contact.name}</div>
-                <div className="truncate text-[.87em] text-muted-foreground">{c.preview}</div>
-              </div>
-              <div className="text-right text-[.8em] text-muted-foreground">
-                {c.time}
-                <br />
-                {c.unread > 0 && (
-                  <span className="mt-1 inline-block h-5 min-w-5 rounded-full bg-accent px-1.5 text-center text-[.9em] font-medium leading-5 text-accent-foreground">
-                    {c.unread}
-                  </span>
-                )}
-              </div>
-            </button>
-          );
-        })}
+            </div>
+          </button>
+        ))}
       </div>
     </aside>
   );

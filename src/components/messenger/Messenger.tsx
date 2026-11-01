@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Icon from "@/components/ui/icon";
 import {
-  AUTO_REPLIES,
-  CONTACTS,
-  INITIAL_CALLS,
-  INITIAL_CHATS,
+  api,
+  ApiError,
+  TOKEN_KEY,
   type CallKind,
   type CallRecord,
-  type Chat,
-  type Contact,
+  type ChatItem,
+  type IncomingCall,
+  type Message,
+  type User,
 } from "@/lib/messenger-data";
 import AppHeader, { type Tab } from "./AppHeader";
 import ChatList from "./ChatList";
@@ -16,138 +18,258 @@ import CallScreen, { type ActiveCall } from "./CallScreen";
 import CallsView from "./CallsView";
 import ContactsView from "./ContactsView";
 import SettingsView from "./SettingsView";
+import AuthScreen from "./AuthScreen";
 import { cn } from "@/lib/utils";
 
-function nowTime() {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
+type PollResult = {
+  chats: ChatItem[];
+  incoming: IncomingCall | null;
+  chatId?: number;
+  messages?: Message[];
+  readUpto?: number;
+};
 
 export default function Messenger() {
-  const [tab, setTab] = useState<Tab>("chats");
-  const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
-  const [calls, setCalls] = useState<CallRecord[]>(INITIAL_CALLS);
-  const [activeId, setActiveId] = useState(INITIAL_CHATS[0].id);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [typingId, setTypingId] = useState<string | null>(null);
-  const [call, setCall] = useState<ActiveCall | null>(null);
-  const timers = useRef<number[]>([]);
+  const [ready, setReady] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [me, setMe] = useState<User | null>(null);
 
-  const contacts = useMemo(() => {
-    const map: Record<string, Contact> = {};
-    CONTACTS.forEach((c) => (map[c.id] = c));
-    return map;
+  useEffect(() => {
+    const t = localStorage.getItem(TOKEN_KEY);
+    if (!t) {
+      setReady(true);
+      return;
+    }
+    api<{ user: User }>("me", {}, t)
+      .then((r) => {
+        setToken(t);
+        setMe(r.user);
+      })
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 401) localStorage.removeItem(TOKEN_KEY);
+      })
+      .finally(() => setReady(true));
   }, []);
 
-  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
-
-  const active = chats.find((c) => c.id === activeId) ?? chats[0];
-  const activeContact = contacts[active.contactId];
-  const missed = calls.filter((c) => c.direction === "missed").length;
-
-  const selectChat = (id: string) => {
-    setActiveId(id);
-    setMobileOpen(true);
-    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
+  const onAuth = (t: string, u: User) => {
+    localStorage.setItem(TOKEN_KEY, t);
+    setToken(t);
+    setMe(u);
   };
 
-  const send = (text: string) => {
-    const chatId = active.id;
-    const time = nowTime();
-    const msgId = `me-${chatId}-${active.messages.length}-${time}`;
+  const logout = () => {
+    if (token) api("logout", {}, token).catch(() => null);
+    localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setMe(null);
+  };
+
+  if (!ready)
+    return (
+      <div className="grid h-[100dvh] place-items-center bg-background text-muted-foreground">
+        <Icon name="Loader2" size={24} className="animate-spin" />
+      </div>
+    );
+  if (!token || !me) return <AuthScreen onAuth={onAuth} />;
+  return <MessengerApp token={token} me={me} setMe={setMe} onLogout={logout} />;
+}
+
+function MessengerApp({
+  token,
+  me,
+  setMe,
+  onLogout,
+}: {
+  token: string;
+  me: User;
+  setMe: (u: User) => void;
+  onLogout: () => void;
+}) {
+  const [tab, setTab] = useState<Tab>("chats");
+  const [chats, setChats] = useState<ChatItem[]>([]);
+  const [chatsLoaded, setChatsLoaded] = useState(false);
+  const [activeId, setActiveId] = useState<number | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [msgLoading, setMsgLoading] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [contacts, setContacts] = useState<User[]>([]);
+  const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [callsLoaded, setCallsLoaded] = useState(false);
+  const [call, setCall] = useState<ActiveCall | null>(null);
+
+  const activeRef = useRef<number | null>(null);
+  const lastIdRef = useRef(0);
+  const callRef = useRef<ActiveCall | null>(null);
+  const seenCalls = useRef<Set<number>>(new Set());
+  const pollingRef = useRef(false);
+
+  activeRef.current = activeId;
+  callRef.current = call;
+
+  const handleAuthError = useCallback(
+    (e: unknown) => {
+      if (e instanceof ApiError && e.status === 401) onLogout();
+    },
+    [onLogout],
+  );
+
+  const poll = useCallback(async () => {
+    if (pollingRef.current) return;
+    pollingRef.current = true;
+    const chatId = activeRef.current;
+    try {
+      const res = await api<PollResult>("poll", { chatId: chatId ?? 0, afterId: chatId ? lastIdRef.current : 0 }, token);
+      setChats(res.chats);
+      setChatsLoaded(true);
+      if (chatId && res.chatId === chatId && activeRef.current === chatId) {
+        const fresh = res.messages ?? [];
+        const readUpto = res.readUpto ?? 0;
+        if (fresh.length) lastIdRef.current = fresh[fresh.length - 1].id;
+        setMessages((prev) => {
+          const known = new Set(prev.map((m) => m.id));
+          const merged = [...prev.filter((m) => m.id > 0), ...fresh.filter((m) => !known.has(m.id))];
+          const pending = prev.filter((m) => m.id < 0 && !fresh.some((f) => f.mine && f.text === m.text));
+          return [...merged, ...pending].map((m) => (m.mine && m.id > 0 && m.id <= readUpto ? { ...m, read: true } : m));
+        });
+        setMsgLoading(false);
+      }
+      const inc = res.incoming;
+      if (inc && !callRef.current && !seenCalls.current.has(inc.id)) {
+        seenCalls.current.add(inc.id);
+        setCall({ peer: inc.peer, kind: inc.kind, incoming: { id: inc.id, offer: inc.offer } });
+      }
+    } catch (e) {
+      handleAuthError(e);
+    } finally {
+      pollingRef.current = false;
+    }
+  }, [token, handleAuthError]);
+
+  useEffect(() => {
+    poll();
+    let t: number;
+    const loop = () => {
+      const delay = document.hidden ? 10000 : 3000;
+      t = window.setTimeout(async () => {
+        await poll();
+        loop();
+      }, delay);
+    };
+    loop();
+    return () => window.clearTimeout(t);
+  }, [poll]);
+
+  useEffect(() => {
+    if (chatsLoaded && activeId === null && chats.length > 0 && window.innerWidth >= 1024) openChat(chats[0].id);
+  }, [chatsLoaded]);
+
+  const loadContacts = useCallback(() => {
+    api<{ contacts: User[] }>("contacts", {}, token)
+      .then((r) => setContacts(r.contacts))
+      .catch(handleAuthError);
+  }, [token, handleAuthError]);
+
+  const loadCalls = useCallback(() => {
+    api<{ calls: CallRecord[] }>("calls", {}, token)
+      .then((r) => {
+        setCalls(r.calls);
+        setCallsLoaded(true);
+      })
+      .catch(handleAuthError);
+  }, [token, handleAuthError]);
+
+  useEffect(() => {
+    loadCalls();
+  }, [loadCalls]);
+
+  useEffect(() => {
+    if (tab === "contacts") loadContacts();
+    if (tab === "calls") loadCalls();
+  }, [tab, loadContacts, loadCalls]);
+
+  const openChat = (id: number) => {
+    if (id !== activeRef.current) {
+      activeRef.current = id;
+      lastIdRef.current = 0;
+      setMessages([]);
+      setMsgLoading(true);
+      setActiveId(id);
+      setChats((prev) => prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
+      poll();
+    }
+    setMobileOpen(true);
+    setTab("chats");
+  };
+
+  const send = async (text: string) => {
+    const chatId = activeRef.current;
+    if (!chatId) return;
+    const tempId = -Date.now();
+    const at = new Date().toISOString();
+    setMessages((prev) => [...prev, { id: tempId, mine: true, text, at, read: false }]);
     setChats((prev) => {
       const target = prev.find((c) => c.id === chatId);
       if (!target) return prev;
-      const updated: Chat = {
-        ...target,
-        preview: text,
-        time,
-        messages: [...target.messages, { id: msgId, from: "me", text, time, read: false }],
-      };
-      return [updated, ...prev.filter((c) => c.id !== chatId)];
+      return [{ ...target, lastText: text, lastAt: at, lastMine: true }, ...prev.filter((c) => c.id !== chatId)];
     });
-    const contact = contacts[active.contactId];
-    if (!contact) return;
-    timers.current.push(
-      window.setTimeout(() => {
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === chatId ? { ...c, messages: c.messages.map((m) => (m.id === msgId ? { ...m, read: true } : m)) } : c,
-          ),
-        );
-        setTypingId(chatId);
-      }, 900),
-    );
-    timers.current.push(
-      window.setTimeout(() => {
-        setTypingId(null);
-        const reply = AUTO_REPLIES[(text.length + active.messages.length) % AUTO_REPLIES.length];
-        const t = nowTime();
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === chatId
-              ? {
-                  ...c,
-                  preview: reply,
-                  time: t,
-                  messages: [...c.messages, { id: `r-${msgId}`, from: "them", text: reply, time: t }],
-                }
-              : c,
-          ),
-        );
-      }, 2600),
-    );
-  };
-
-  const startCall = (contactId: string, kind: CallKind, incoming = false) => {
-    const contact = contacts[contactId];
-    if (!contact) return;
-    setCall({ contact, kind, incoming });
-  };
-
-  const endCall = (seconds: number, accepted: boolean) => {
-    if (!call) return;
-    const time = nowTime();
-    const duration = seconds > 0 ? (seconds < 60 ? `${seconds} сек` : `${Math.round(seconds / 60)} мин`) : "—";
-    const direction = call.incoming ? (accepted ? "in" : "missed") : "out";
-    setCalls((prev) => [
-      {
-        id: `call-${prev.length}-${time}`,
-        contactId: call.contact.id,
-        kind: call.kind,
-        direction,
-        when: `Сегодня, ${time}`,
-        duration,
-      },
-      ...prev,
-    ]);
-    const label = `${call.kind === "video" ? "Видеозвонок" : "Аудиозвонок"}${duration !== "—" ? ` · ${duration}` : ""}`;
-    setChats((prev) =>
-      prev.map((c) =>
-        c.contactId === call.contact.id
-          ? { ...c, preview: direction === "missed" ? "Пропущенный звонок" : label, time }
-          : c,
-      ),
-    );
-    setCall(null);
-  };
-
-  const simulateIncoming = () => {
-    timers.current.push(window.setTimeout(() => startCall("ek", "video", true), 2000));
-  };
-
-  const openChatWith = (contactId: string) => {
-    const existing = chats.find((c) => c.contactId === contactId);
-    if (existing) {
-      selectChat(existing.id);
-    } else {
-      const id = `c-${contactId}`;
-      setChats((prev) => [{ id, contactId, unread: 0, preview: "Новый чат", time: nowTime(), messages: [] }, ...prev]);
-      setActiveId(id);
-      setMobileOpen(true);
+    try {
+      const r = await api<{ message: Message }>("send", { chatId, text }, token);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === r.message.id)) return prev.filter((m) => m.id !== tempId);
+        return prev.map((m) => (m.id === tempId ? r.message : m));
+      });
+    } catch (e) {
+      handleAuthError(e);
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
     }
-    setTab("chats");
   };
+
+  const openChatWith = async (user: User) => {
+    const existing = chats.find((c) => c.peer.id === user.id);
+    if (existing) return openChat(existing.id);
+    try {
+      const r = await api<{ chatId: number }>("open_chat", { userId: user.id }, token);
+      setChats((prev) => [{ id: r.chatId, peer: user, lastText: "", lastAt: null, lastMine: false, unread: 0 }, ...prev]);
+      openChat(r.chatId);
+    } catch (e) {
+      handleAuthError(e);
+    }
+  };
+
+  const addContact = async (phone: string) => {
+    try {
+      const r = await api<{ contact: User; chatId: number }>("add_contact", { phone }, token);
+      setContacts((prev) => (prev.some((c) => c.id === r.contact.id) ? prev : [...prev, r.contact]));
+      return null;
+    } catch (e) {
+      handleAuthError(e);
+      return e instanceof Error ? e.message : "Ошибка";
+    }
+  };
+
+  const saveProfile = async (name: string, status: string) => {
+    try {
+      const r = await api<{ user: User }>("update_profile", { name, status }, token);
+      setMe(r.user);
+      return null;
+    } catch (e) {
+      handleAuthError(e);
+      return e instanceof Error ? e.message : "Ошибка";
+    }
+  };
+
+  const startCall = (peer: User, kind: CallKind) => {
+    if (call) return;
+    setCall({ peer, kind });
+  };
+
+  const closeCall = () => {
+    setCall(null);
+    loadCalls();
+  };
+
+  const active = chats.find((c) => c.id === activeId);
+  const missed = calls.filter((c) => c.direction === "missed").length;
 
   return (
     <div className="app-text flex h-[100dvh] flex-col overflow-hidden bg-background">
@@ -162,31 +284,49 @@ export default function Messenger() {
           <>
             <ChatList
               chats={chats}
-              contacts={contacts}
-              activeId={active.id}
-              onSelect={selectChat}
-              className={cn(mobileOpen && "hidden lg:flex")}
+              activeId={activeId}
+              loaded={chatsLoaded}
+              onSelect={openChat}
+              onNew={() => setTab("contacts")}
+              className={cn(mobileOpen && active && "hidden lg:flex")}
             />
-            {activeContact && (
+            {active ? (
               <ActiveChat
-                chat={active}
-                contact={activeContact}
-                typing={typingId === active.id}
+                peer={active.peer}
+                messages={messages}
+                loading={msgLoading}
                 onSend={send}
-                onCall={(k) => startCall(active.contactId, k)}
+                onCall={(k) => startCall(active.peer, k)}
                 onBack={() => setMobileOpen(false)}
                 className={cn(!mobileOpen && "hidden lg:grid")}
               />
+            ) : (
+              <section className="hidden flex-col items-center justify-center gap-3 rounded-[14px] bg-card p-8 text-center lg:flex">
+                <span className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-tile-a to-tile-b">
+                  <Icon name="MessageCircle" size={28} />
+                </span>
+                <h1 className="hero-title">Здравствуйте, {me.name.split(" ")[0]}</h1>
+                <p className="max-w-[420px] text-muted-foreground">
+                  Выберите чат слева или добавьте человека по номеру телефона, чтобы написать или позвонить.
+                </p>
+                <button
+                  onClick={() => setTab("contacts")}
+                  className="mt-2 inline-flex h-[38px] items-center gap-2 rounded-full bg-primary px-[18px] font-head font-semibold text-primary-foreground"
+                >
+                  <Icon name="UserPlus" size={16} />
+                  Добавить контакт
+                </button>
+              </section>
             )}
           </>
         )}
-        {tab === "calls" && (
-          <CallsView calls={calls} contacts={contacts} onCall={startCall} onSimulateIncoming={simulateIncoming} />
+        {tab === "calls" && <CallsView calls={calls} loaded={callsLoaded} onCall={startCall} />}
+        {tab === "contacts" && (
+          <ContactsView contacts={contacts} onCall={startCall} onMessage={openChatWith} onAdd={addContact} />
         )}
-        {tab === "contacts" && <ContactsView contacts={CONTACTS} onCall={startCall} onMessage={openChatWith} />}
-        {tab === "settings" && <SettingsView />}
+        {tab === "settings" && <SettingsView user={me} onSave={saveProfile} onLogout={onLogout} />}
       </main>
-      {call && <CallScreen key={`${call.contact.id}-${call.kind}`} call={call} onEnd={endCall} />}
+      {call && <CallScreen key={call.incoming?.id ?? `out-${call.peer.id}`} call={call} token={token} onClose={closeCall} />}
     </div>
   );
 }

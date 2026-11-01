@@ -1,40 +1,149 @@
 import { useEffect, useRef, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
-import type { CallKind, Contact } from "@/lib/messenger-data";
+import { api, API_URL, type CallKind, type User } from "@/lib/messenger-data";
+import { createPeer, getMedia, waitIce } from "@/lib/webrtc";
 import UserAvatar from "./UserAvatar";
 
 export type ActiveCall = {
-  contact: Contact;
+  peer: User;
   kind: CallKind;
-  incoming: boolean;
+  incoming?: { id: number; offer: string };
 };
 
 type Props = {
   call: ActiveCall;
-  onEnd: (seconds: number, accepted: boolean) => void;
+  token: string;
+  onClose: () => void;
 };
+
+type Phase = "ringing" | "connecting" | "calling" | "live" | "ended";
 
 function fmt(s: number) {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export default function CallScreen({ call, onEnd }: Props) {
-  const [phase, setPhase] = useState<"ringing" | "connecting" | "live">(call.incoming ? "ringing" : "connecting");
-  const [kind, setKind] = useState<CallKind>(call.kind);
+export default function CallScreen({ call, token, onClose }: Props) {
+  const isVideo = call.kind === "video";
+  const [phase, setPhase] = useState<Phase>(call.incoming ? "ringing" : "connecting");
+  const [endText, setEndText] = useState("Звонок завершён");
   const [mic, setMic] = useState(true);
-  const [cam, setCam] = useState(call.kind === "video");
+  const [cam, setCam] = useState(isVideo);
   const [speaker, setSpeaker] = useState(true);
   const [seconds, setSeconds] = useState(0);
-  const [camError, setCamError] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const [noCamera, setNoCamera] = useState(false);
+  const [remoteVideo, setRemoteVideo] = useState(false);
 
-  // исходящий: имитируем гудки и соединение
+  const localRef = useRef<HTMLVideoElement>(null);
+  const remoteRef = useRef<HTMLVideoElement>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const callIdRef = useRef<number | null>(call.incoming?.id ?? null);
+  const finishedRef = useRef(false);
+
+  const cleanup = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    pcRef.current?.close();
+    pcRef.current = null;
+  };
+
+  const finish = (text: string, notify: boolean) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    if (notify && callIdRef.current) api("call_end", { callId: callIdRef.current }, token).catch(() => null);
+    cleanup();
+    setEndText(text);
+    setPhase("ended");
+    window.setTimeout(onClose, 1400);
+  };
+
+  const attachLocal = (stream: MediaStream) => {
+    streamRef.current = stream;
+    if (localRef.current) localRef.current.srcObject = stream;
+    if (isVideo && stream.getVideoTracks().length === 0) {
+      setNoCamera(true);
+      setCam(false);
+    }
+  };
+
+  const setupPeer = (stream: MediaStream | null) => {
+    const pc = createPeer();
+    pcRef.current = pc;
+    const remote = new MediaStream();
+    remoteStreamRef.current = remote;
+    if (remoteRef.current) remoteRef.current.srcObject = remote;
+    pc.ontrack = (e) => {
+      remote.addTrack(e.track);
+      if (e.track.kind === "video") setRemoteVideo(true);
+      if (remoteRef.current) {
+        remoteRef.current.srcObject = remote;
+        remoteRef.current.play().catch(() => null);
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") setPhase("live");
+      if (pc.connectionState === "failed") finish("Не удалось соединиться", true);
+    };
+    if (stream) stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+    if (!stream || stream.getAudioTracks().length === 0) pc.addTransceiver("audio", { direction: "recvonly" });
+    if (isVideo && (!stream || stream.getVideoTracks().length === 0)) pc.addTransceiver("video", { direction: "recvonly" });
+    return pc;
+  };
+
   useEffect(() => {
-    if (phase !== "connecting") return;
-    const t = window.setTimeout(() => setPhase("live"), 2200);
-    return () => window.clearTimeout(t);
+    if (call.incoming) return;
+    let cancelled = false;
+    (async () => {
+      const stream = await getMedia(isVideo);
+      if (cancelled) {
+        stream?.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      if (stream) attachLocal(stream);
+      const pc = setupPeer(stream);
+      await pc.setLocalDescription(await pc.createOffer());
+      await waitIce(pc);
+      if (cancelled) return;
+      try {
+        const res = await api<{ callId: number }>(
+          "call_start",
+          { userId: call.peer.id, kind: call.kind, offer: JSON.stringify(pc.localDescription) },
+          token,
+        );
+        callIdRef.current = res.callId;
+        if (!finishedRef.current) setPhase("calling");
+      } catch (e) {
+        finish(e instanceof Error ? e.message : "Ошибка звонка", false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (phase !== "calling" && phase !== "live" && phase !== "ringing") return;
+    let gotAnswer = phase === "live" || !!call.incoming;
+    const tick = async () => {
+      const id = callIdRef.current;
+      if (!id || finishedRef.current) return;
+      try {
+        const res = await api<{ status: string; answer: string | null }>("call_get", { callId: id }, token);
+        if (res.status === "declined") return finish("Звонок отклонён", false);
+        if (res.status === "missed") return finish(call.incoming ? "Пропущенный звонок" : "Не отвечает", false);
+        if (res.status === "ended") return finish("Звонок завершён", false);
+        if (!gotAnswer && res.answer && pcRef.current) {
+          gotAnswer = true;
+          await pcRef.current.setRemoteDescription(JSON.parse(res.answer));
+        }
+      } catch {
+        return;
+      }
+    };
+    const t = window.setInterval(tick, phase === "calling" ? 1500 : 3000);
+    return () => window.clearInterval(t);
   }, [phase]);
 
   useEffect(() => {
@@ -43,56 +152,71 @@ export default function CallScreen({ call, onEnd }: Props) {
     return () => window.clearInterval(t);
   }, [phase]);
 
-  // локальная камера
   useEffect(() => {
-    const wantVideo = kind === "video" && cam && phase !== "ringing";
-    if (!wantVideo) {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      if (videoRef.current) videoRef.current.srcObject = null;
-      return;
-    }
-    let cancelled = false;
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCamError(true);
-      return;
-    }
-    navigator.mediaDevices
-      .getUserMedia({ video: true, audio: false })
-      .then((stream) => {
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-        setCamError(false);
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      })
-      .catch(() => setCamError(true));
-    return () => {
-      cancelled = true;
+    streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = mic));
+  }, [mic]);
+
+  useEffect(() => {
+    streamRef.current?.getVideoTracks().forEach((t) => (t.enabled = cam));
+  }, [cam]);
+
+  useEffect(() => {
+    if (remoteRef.current) remoteRef.current.muted = !speaker;
+  }, [speaker]);
+
+  useEffect(() => {
+    if (localRef.current && streamRef.current) localRef.current.srcObject = streamRef.current;
+  }, [phase]);
+
+  useEffect(() => {
+    const onUnload = () => {
+      if (callIdRef.current && !finishedRef.current)
+        fetch(API_URL, {
+          method: "POST",
+          keepalive: true,
+          headers: { "Content-Type": "application/json", "X-Auth-Token": token },
+          body: JSON.stringify({ action: "call_end", callId: callIdRef.current }),
+        }).catch(() => null);
     };
-  }, [kind, cam, phase]);
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      cleanup();
+    };
+  }, []);
 
-  useEffect(
-    () => () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-    },
-    [],
-  );
+  const accept = async () => {
+    if (!call.incoming) return;
+    setPhase("connecting");
+    const stream = await getMedia(isVideo);
+    if (stream) attachLocal(stream);
+    const pc = setupPeer(stream);
+    try {
+      await pc.setRemoteDescription(JSON.parse(call.incoming.offer));
+      await pc.setLocalDescription(await pc.createAnswer());
+      await waitIce(pc);
+      await api("call_answer", { callId: call.incoming.id, answer: JSON.stringify(pc.localDescription) }, token);
+    } catch (e) {
+      finish(e instanceof Error ? e.message : "Не удалось ответить", true);
+    }
+  };
 
-  const hangup = () => onEnd(seconds, phase !== "ringing");
+  const hangup = () => finish(phase === "ringing" ? "Звонок отклонён" : "Звонок завершён", true);
 
   const statusText =
     phase === "ringing"
-      ? kind === "video"
+      ? isVideo
         ? "Входящий видеозвонок"
         : "Входящий аудиозвонок"
       : phase === "connecting"
-        ? "Вызов…"
-        : fmt(seconds);
+        ? "Соединение…"
+        : phase === "calling"
+          ? "Вызов…"
+          : phase === "ended"
+            ? endText
+            : fmt(seconds);
 
-  const isVideo = kind === "video";
+  const showRemote = isVideo && phase === "live" && remoteVideo;
 
   return (
     <div className="fixed inset-0 z-50 flex animate-in fade-in items-center justify-center bg-foreground/40 p-2.5 backdrop-blur-sm duration-200 lg:p-10">
@@ -102,7 +226,13 @@ export default function CallScreen({ call, onEnd }: Props) {
           isVideo ? "bg-primary text-primary-foreground" : "bg-gradient-to-br from-tile-a to-tile-b text-foreground",
         )}
       >
-        {/* верх */}
+        <video
+          ref={remoteRef}
+          autoPlay
+          playsInline
+          className={cn("absolute inset-0 h-full w-full bg-black object-cover", !showRemote && "pointer-events-none opacity-0")}
+        />
+
         <div className="relative z-10 flex items-center justify-between p-5 lg:p-7">
           <div className="flex items-center gap-2 font-head font-semibold">
             <Icon name={isVideo ? "Video" : "Phone"} size={18} />
@@ -119,48 +249,57 @@ export default function CallScreen({ call, onEnd }: Props) {
           </span>
         </div>
 
-        {/* центр */}
         <div className="relative flex flex-1 flex-col items-center justify-center gap-5 px-5 text-center">
-          {isVideo && phase === "live" && (
-            <div className="absolute inset-0 grid place-items-center">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,hsl(var(--accent)/0.35),transparent_60%)]" />
-            </div>
-          )}
-          <div className="relative">
-            {phase !== "live" &&
-              [0, 0.5].map((d) => (
-                <span
-                  key={d}
+          {!showRemote && (
+            <>
+              <div className="relative">
+                {(phase === "ringing" || phase === "calling") &&
+                  [0, 0.5].map((d) => (
+                    <span
+                      key={d}
+                      className={cn(
+                        "absolute inset-0 animate-ring-pulse rounded-full",
+                        isVideo ? "bg-accent/50" : "bg-primary/25",
+                      )}
+                      style={{ animationDelay: `${d}s` }}
+                    />
+                  ))}
+                <UserAvatar user={call.peer} hideOnline size={128} className="relative" />
+              </div>
+              <div className="relative">
+                <h2 className="hero-title">{call.peer.name}</h2>
+                <p
                   className={cn(
-                    "absolute inset-0 animate-ring-pulse rounded-full",
-                    isVideo ? "bg-accent/50" : "bg-primary/25",
+                    "mt-2 font-head text-[1.1em] tabular-nums",
+                    isVideo ? "text-primary-foreground/70" : "text-muted-foreground",
                   )}
-                  style={{ animationDelay: `${d}s` }}
-                />
-              ))}
-            <UserAvatar
-              contact={{ ...call.contact, online: false }}
-              size={128}
-              className="relative"
-            />
-          </div>
-          <div className="relative">
-            <h2 className="hero-title">{call.contact.name}</h2>
-            <p className={cn("mt-2 font-head text-[1.1em] tabular-nums", isVideo ? "text-primary-foreground/70" : "text-muted-foreground")}>
-              {statusText}
-            </p>
-          </div>
+                >
+                  {statusText}
+                </p>
+              </div>
+            </>
+          )}
+          {showRemote && (
+            <span className="absolute left-5 top-0 rounded-full bg-black/40 px-3 py-1 font-head text-[.9em] tabular-nums text-white lg:left-7">
+              {call.peer.name} · {fmt(seconds)}
+            </span>
+          )}
         </div>
 
-        {/* превью своей камеры */}
-        {isVideo && phase !== "ringing" && (
+        {isVideo && phase !== "ringing" && phase !== "ended" && (
           <div className="absolute bottom-28 right-4 z-10 aspect-[3/4] w-28 overflow-hidden rounded-xl border border-primary-foreground/20 bg-foreground/60 sm:w-40 lg:bottom-32 lg:right-7 lg:w-48">
-            <video ref={videoRef} autoPlay playsInline muted className={cn("h-full w-full -scale-x-100 object-cover", (!cam || camError) && "hidden")} />
-            {(!cam || camError) && (
+            <video
+              ref={localRef}
+              autoPlay
+              playsInline
+              muted
+              className={cn("h-full w-full -scale-x-100 object-cover", (!cam || noCamera) && "hidden")}
+            />
+            {(!cam || noCamera) && (
               <div className="grid h-full place-items-center p-3 text-center text-[.75em] text-primary-foreground/70">
                 <div>
                   <Icon name="VideoOff" size={22} className="mx-auto mb-1.5" />
-                  {camError && cam ? "Нет доступа к камере" : "Камера выключена"}
+                  {noCamera ? "Нет доступа к камере" : "Камера выключена"}
                 </div>
               </div>
             )}
@@ -168,9 +307,8 @@ export default function CallScreen({ call, onEnd }: Props) {
           </div>
         )}
 
-        {/* кнопки */}
         <div className="relative z-10 flex flex-wrap items-center justify-center gap-3 p-5 lg:p-7">
-          {phase === "ringing" ? (
+          {phase === "ended" ? null : phase === "ringing" ? (
             <>
               <button
                 onClick={hangup}
@@ -180,7 +318,7 @@ export default function CallScreen({ call, onEnd }: Props) {
                 Отклонить
               </button>
               <button
-                onClick={() => setPhase("live")}
+                onClick={accept}
                 className="flex h-14 items-center gap-2 rounded-full bg-online px-6 font-head font-semibold text-primary-foreground transition-transform hover:scale-105"
               >
                 <Icon name={isVideo ? "Video" : "Phone"} size={20} />
@@ -189,20 +327,29 @@ export default function CallScreen({ call, onEnd }: Props) {
             </>
           ) : (
             <>
-              <CtrlButton dark={isVideo} active={mic} onClick={() => setMic((v) => !v)} icon={mic ? "Mic" : "MicOff"} label={mic ? "Микрофон" : "Без звука"} />
               <CtrlButton
                 dark={isVideo}
-                active={isVideo && cam}
-                onClick={() => {
-                  if (!isVideo) {
-                    setKind("video");
-                    setCam(true);
-                  } else setCam((v) => !v);
-                }}
-                icon={isVideo && cam ? "Video" : "VideoOff"}
-                label="Камера"
+                active={mic}
+                onClick={() => setMic((v) => !v)}
+                icon={mic ? "Mic" : "MicOff"}
+                label={mic ? "Микрофон" : "Без звука"}
               />
-              <CtrlButton dark={isVideo} active={speaker} onClick={() => setSpeaker((v) => !v)} icon={speaker ? "Volume2" : "VolumeX"} label="Динамик" />
+              {isVideo && (
+                <CtrlButton
+                  dark
+                  active={cam && !noCamera}
+                  onClick={() => !noCamera && setCam((v) => !v)}
+                  icon={cam && !noCamera ? "Video" : "VideoOff"}
+                  label="Камера"
+                />
+              )}
+              <CtrlButton
+                dark={isVideo}
+                active={speaker}
+                onClick={() => setSpeaker((v) => !v)}
+                icon={speaker ? "Volume2" : "VolumeX"}
+                label="Динамик"
+              />
               <button
                 onClick={hangup}
                 aria-label="Завершить"
