@@ -41,7 +41,6 @@ type PollResult = {
 type History = Record<number, Message[]>;
 
 const HISTORY_LIMIT = 3000;
-const AUTO_LOCK_MS = 10 * 60 * 1000;
 
 function Loader() {
   return (
@@ -76,11 +75,20 @@ export default function Messenger() {
       .finally(() => setReady(true));
   }, []);
 
+  const [pending, setPendingE2e] = useState<E2E | null>(null);
+  const unlockedKey = (id: number) => `rusapp_unlocked_${id}`;
+
   const publish = async (id: E2E, user: User, t: string) => {
     if (user.publicKey !== id.pub) {
       await api("set_key", { publicKey: id.pub }, t);
       setMe({ ...user, publicKey: id.pub });
     }
+  };
+
+  const openSession = (id: E2E, user: User) => {
+    sessionStorage.setItem(unlockedKey(user.id), "1");
+    setPendingE2e(null);
+    setVaultMode(null);
     setE2e(id);
   };
 
@@ -92,6 +100,10 @@ export default function Messenger() {
         if (kind === "pin") return setVaultMode("unlock");
         const id = await loadIdentity(await Vault.openDevice(me.id));
         await publish(id, me, token);
+        const locked = await id.vault.hasLock();
+        if (locked && sessionStorage.getItem(unlockedKey(me.id)) === "1") return openSession(id, me);
+        setPendingE2e(id);
+        setVaultMode(locked ? "unlock" : "create");
       })
       .catch(() => setVaultError("Не удалось подготовить защищённое хранилище на этом устройстве"));
   }, [me?.id, token, e2e]);
@@ -102,15 +114,6 @@ export default function Messenger() {
     setMe(u);
   };
 
-  const lock = useCallback(() => {
-    setE2e((cur) => {
-      if (cur && !cur.vault.pin) return cur;
-      cur?.vault.close();
-      return null;
-    });
-    setVaultMode(null);
-  }, []);
-
   useEffect(() => {
     registerSw();
   }, []);
@@ -120,22 +123,33 @@ export default function Messenger() {
       const t = token;
       unsubscribePush(t).finally(() => api("logout", {}, t).catch(() => null));
     }
+    if (me) sessionStorage.removeItem(unlockedKey(me.id));
     localStorage.removeItem(TOKEN_KEY);
     setE2e((cur) => {
       cur?.vault.close();
       return null;
     });
+    setPendingE2e(null);
     setVaultMode(null);
     setToken(null);
     setMe(null);
-  }, [token]);
+  }, [token, me]);
 
   const openVault = async (pin: string) => {
     if (!me || !token) return "Нет сессии";
     try {
+      if (pending) {
+        if (vaultMode === "create") await pending.vault.setLock(pin);
+        else if (!(await pending.vault.checkLock(pin))) return "Неверный код доступа";
+        openSession(pending, me);
+        return null;
+      }
       const pinVault = await Vault.unlock(me.id, pin);
       const vault = pinVault.pin ? await pinVault.toDevice(me.id) : pinVault;
-      await publish(await loadIdentity(vault), me, token);
+      if (!(await vault.hasLock())) await vault.setLock(pin);
+      const id = await loadIdentity(vault);
+      await publish(id, me, token);
+      openSession(id, me);
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Не удалось открыть хранилище";
@@ -144,6 +158,8 @@ export default function Messenger() {
 
   const resetVault = async () => {
     if (!me) return;
+    pending?.vault.close();
+    setPendingE2e(null);
     await wipeVault(me.id);
     setVaultMode(null);
     setE2e(null);
@@ -164,7 +180,7 @@ export default function Messenger() {
           </div>
         </div>
       );
-    if (vaultMode !== "unlock") return <Loader />;
+    if (!vaultMode) return <Loader />;
     return (
       <PinScreen
         key={vaultMode}
@@ -183,7 +199,6 @@ export default function Messenger() {
       e2e={e2e}
       setMe={setMe}
       onLogout={logout}
-      onLock={e2e.vault.pin ? lock : undefined}
     />
   );
 }
@@ -200,14 +215,12 @@ function MessengerApp({
   e2e,
   setMe,
   onLogout,
-  onLock,
 }: {
   token: string;
   me: User;
   e2e: E2E;
   setMe: (u: User) => void;
   onLogout: () => void;
-  onLock?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("chats");
   const [serverChats, setServerChats] = useState<ChatItem[]>([]);
@@ -496,15 +509,6 @@ function MessengerApp({
     return () => navigator.serviceWorker?.removeEventListener("message", onMsg);
   }, []);
 
-  useEffect(() => {
-    let hiddenAt = 0;
-    const onVis = () => {
-      if (document.hidden) hiddenAt = Date.now();
-      else if (onLock && hiddenAt && Date.now() - hiddenAt > AUTO_LOCK_MS && !callRef.current) onLock();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [onLock]);
 
   const chats = useMemo<ChatItem[]>(() => {
     return serverChats
@@ -738,7 +742,7 @@ function MessengerApp({
           />
         )}
         {tab === "settings" && (
-          <SettingsView user={me} onSave={saveProfile} onLogout={onLogout} onLock={onLock} onClearHistory={clearHistory} />
+          <SettingsView user={me} onSave={saveProfile} onLogout={onLogout} onClearHistory={clearHistory} />
         )}
       </main>
       {groupPicker && (

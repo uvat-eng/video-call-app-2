@@ -96,6 +96,12 @@ async function pinKey(pin: string, salt: Uint8Array<ArrayBuffer>, iter: number) 
   );
 }
 
+async function lockHash(pin: string, salt: Uint8Array<ArrayBuffer>) {
+  const base = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: PBKDF2_ITER, hash: "SHA-256" }, base, 256);
+  return b64(bits);
+}
+
 export class Vault {
   private db: IDBDatabase;
   private key: CryptoKey;
@@ -155,8 +161,23 @@ export class Vault {
     return new Vault(db, key);
   }
 
+  async hasLock() {
+    return !!(await this.get<{ salt: string; hash: string }>("applock"));
+  }
+
+  async setLock(pin: string) {
+    const salt = rnd(16);
+    await this.set("applock", { salt: b64(salt), hash: await lockHash(pin, salt) });
+  }
+
+  async checkLock(pin: string) {
+    const rec = await this.get<{ salt: string; hash: string }>("applock");
+    if (!rec) return true;
+    return (await lockHash(pin, unb64(rec.salt))) === rec.hash;
+  }
+
   async toDevice(userId: number) {
-    const keys = ["identity", "history", "phonebook", "outbox"];
+    const keys = ["identity", "history", "phonebook", "outbox", "applock"];
     const data: Record<string, unknown> = {};
     for (const k of keys) data[k] = await this.get(k);
     this.close();

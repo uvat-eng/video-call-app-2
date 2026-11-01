@@ -51,8 +51,8 @@ export default function PinScreen({ mode, name, onSubmit, onReset, onLogout }: P
         </h1>
         <p className="text-[.9em] text-muted-foreground">
           {mode === "create"
-            ? "Придумайте код доступа. Им шифруются ваши ключи и история на этом устройстве. Код нигде не хранится, восстановить его нельзя."
-            : "Введите код доступа, чтобы открыть зашифрованное хранилище на этом устройстве."}
+            ? "Придумайте код для входа в приложение. Его спросят только после полного закрытия RusAPP — пока приложение открыто или свёрнуто, вводить его не нужно."
+            : "Введите код доступа. Пока RusAPP открыт или свёрнут, повторно его не спросят."}
         </p>
         <input
           value={pin}
@@ -82,13 +82,13 @@ export default function PinScreen({ mode, name, onSubmit, onReset, onLogout }: P
           className="mt-1 inline-flex h-12 items-center justify-center gap-2 rounded-full bg-primary font-head font-semibold text-primary-foreground disabled:opacity-60"
         >
           <Icon name={busy ? "Loader2" : mode === "create" ? "Lock" : "Unlock"} size={16} className={busy ? "animate-spin" : ""} />
-          {mode === "create" ? "Создать хранилище" : "Открыть"}
+          {mode === "create" ? "Сохранить код" : "Открыть"}
         </button>
         <div className="mt-2 flex flex-wrap justify-between gap-2 text-[.8em] text-muted-foreground">
           {mode === "unlock" &&
             (confirmReset ? (
               <span>
-                Вся история на устройстве будет удалена.{" "}
+                Вся переписка на этом устройстве будет удалена.{" "}
                 <button type="button" onClick={onReset} className="font-medium text-destructive hover:underline">
                   Сбросить
                 </button>
