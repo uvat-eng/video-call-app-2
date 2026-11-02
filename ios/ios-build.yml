@@ -1,12 +1,1 @@
-name: iOS сборка
-on: workflow_dispatch
-jobs:
-  build:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - run: bash ios/build.sh
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+{"name": "iOS сборка", "on": "workflow_dispatch", "jobs": {"build": {"runs-on": "macos-15", "steps": [{"uses": "actions/checkout@v4"}, {"run": "bash ios/build.sh", "env": {"ASC_KEY_ID": "${{ secrets.ASC_KEY_ID }}", "ASC_ISSUER_ID": "${{ secrets.ASC_ISSUER_ID }}", "ASC_KEY_P8": "${{ secrets.ASC_KEY_P8 }}"}}]}}}
