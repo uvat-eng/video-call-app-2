@@ -10,7 +10,7 @@ export type Look = {
 };
 
 export const DEFAULT_LOOK: Look = {
-  theme: "light",
+  theme: "system",
   palette: "sage",
   scale: 1,
   wallpaper: "none",
@@ -21,7 +21,7 @@ export const DEFAULT_LOOK: Look = {
 type Pal = { name: string; primary: string; accent: string; accentFg: string; tileA: string; tileB: string; swatch: string };
 
 export const PALETTES: Record<string, Pal> = {
-  sage: { name: "Шалфей", primary: "146.7 30.3% 17.5%", accent: "110.9 38.7% 73.1%", accentFg: "117 40% 9.8%", tileA: "104.3 35.4% 87.3%", tileB: "93.3 19.1% 90.8%", swatch: "#1f3d2b" },
+  sage: { name: "Зелёная", primary: "169 100% 25%", accent: "111 91% 91%", accentFg: "202 32% 10%", tileA: "110 81% 92%", tileB: "216 20% 95%", swatch: "#008069" },
   ocean: { name: "Океан", primary: "211 62% 28%", accent: "199 78% 76%", accentFg: "211 70% 12%", tileA: "199 70% 88%", tileB: "210 35% 92%", swatch: "#1b4a7a" },
   sunset: { name: "Закат", primary: "16 70% 38%", accent: "28 92% 76%", accentFg: "16 70% 14%", tileA: "28 90% 88%", tileB: "20 45% 92%", swatch: "#a8431d" },
   lavender: { name: "Лаванда", primary: "262 40% 32%", accent: "258 70% 82%", accentFg: "262 50% 14%", tileA: "258 65% 90%", tileB: "260 30% 93%", swatch: "#4b3375" },
@@ -30,7 +30,7 @@ export const PALETTES: Record<string, Pal> = {
 };
 
 export const WALLPAPERS: Record<string, { name: string; css: string }> = {
-  none: { name: "Без обоев", css: "" },
+  none: { name: "Классические", css: "" },
   mint: { name: "Мята", css: "linear-gradient(160deg, #e3f1e4 0%, #cfe6d3 100%)" },
   sky: { name: "Небо", css: "linear-gradient(160deg, #e2efff 0%, #c7dcf5 100%)" },
   peach: { name: "Персик", css: "linear-gradient(160deg, #fff0e2 0%, #fbd9c1 100%)" },
@@ -69,14 +69,20 @@ const WP_KEY = "rusapp_wallpaper_img";
 
 export function loadLook(): Look {
   try {
-    return { ...DEFAULT_LOOK, ...(JSON.parse(localStorage.getItem(KEY) || "{}") as Partial<Look>) };
+    const saved = JSON.parse(localStorage.getItem(KEY) || "{}") as Partial<Look> & { v?: number };
+    if (saved.v !== 2) {
+      delete saved.theme;
+      delete saved.palette;
+      delete saved.bubble;
+    }
+    return { ...DEFAULT_LOOK, ...saved };
   } catch {
     return DEFAULT_LOOK;
   }
 }
 
 export function saveLook(look: Look) {
-  localStorage.setItem(KEY, JSON.stringify(look));
+  localStorage.setItem(KEY, JSON.stringify({ ...look, v: 2 }));
 }
 
 export function loadWallpaperImage() {

@@ -42,67 +42,68 @@ export default function SettingsView(props: Props) {
   const [section, setSection] = useState<Section | null>(props.linkCode ? "devices" : null);
   const current = SECTIONS.find((s) => s[0] === section);
 
-  return (
-    <>
-      <aside className={cn("flex min-h-0 flex-col gap-1 overflow-y-auto rounded-[14px] bg-card p-4", section && "hidden lg:flex")}>
-        <button
-          onClick={() => setSection("profile")}
-          className="mb-2 flex items-center gap-4 rounded-xl p-2 text-left hover:bg-background"
-        >
-          <UserAvatar user={{ ...user, online: false }} size={64} />
-          <div className="min-w-0">
-            <div className="truncate text-[1.25em] font-semibold tracking-[-0.03em]">{user.name}</div>
-            <div className="truncate text-[.9em] text-muted-foreground">{user.status || user.phone}</div>
-          </div>
-        </button>
-        {SECTIONS.map(([id, label, icon, hint]) => (
-          <button
-            key={id}
-            onClick={() => setSection(id)}
-            className={cn(
-              "flex items-center gap-3 rounded-xl p-2.5 text-left transition-colors",
-              section === id ? "bg-background" : "hover:bg-background/60",
-            )}
-          >
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-tile-a to-tile-b">
-              <Icon name={icon} size={18} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block font-medium">{label}</span>
-              <span className="block truncate text-[.82em] text-muted-foreground">{hint}</span>
-            </span>
-            <Icon name="ChevronRight" size={16} className="text-muted-foreground" />
-          </button>
-        ))}
-        <button
-          onClick={onLogout}
-          className="mt-3 flex items-center gap-3 rounded-xl p-2.5 text-left font-medium text-destructive hover:bg-background/60"
-        >
-          <span className="grid h-10 w-10 place-items-center">
-            <Icon name="LogOut" size={18} />
-          </span>
-          Выйти из аккаунта
-        </button>
-      </aside>
-
-      <section className={cn("min-h-0 overflow-y-auto rounded-[14px] bg-card p-6 lg:p-7", !section && "hidden lg:block")}>
-        <div className="mb-6 flex items-center gap-3">
-          {section && (
-            <button onClick={() => setSection(null)} className="rounded-full bg-background p-2 lg:hidden" aria-label="Назад">
-              <Icon name="ArrowLeft" size={18} />
+  if (section) {
+    return (
+      <div className="absolute inset-0 z-20 flex flex-col bg-card">
+        <header className="pt-safe shrink-0 border-b border-border bg-card">
+          <div className="flex h-14 items-center gap-2 px-1">
+            <button
+              onClick={() => setSection(null)}
+              className="grid h-10 w-10 place-items-center rounded-full active:bg-secondary"
+              aria-label="Назад"
+            >
+              <Icon name="ArrowLeft" size={22} />
             </button>
-          )}
-          <h1 className="hero-title">{current ? current[1] : "Настройки"}</h1>
+            <h2 className="truncate text-[1.25em] font-medium">{current?.[1]}</h2>
+          </div>
+        </header>
+        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-5">
+          {section === "profile" && <ProfileSection user={user} onSave={props.onSave} onAvatar={props.onAvatar} />}
+          {section === "appearance" && <AppearanceSection look={props.look} onChange={props.onLook} />}
+          {section === "devices" && <DevicesSection token={props.token} onApprove={props.onApproveDevice} initialCode={props.linkCode} />}
+          {section === "backup" && <BackupSection {...props.backup} />}
+          {section === "privacy" && <PrivacySection {...props} />}
+          {section === "notifications" && <NotificationsSection onTestPush={props.onTestPush} />}
         </div>
-        {!section && <p className="text-muted-foreground">Выберите раздел слева.</p>}
-        {section === "profile" && <ProfileSection user={user} onSave={props.onSave} onAvatar={props.onAvatar} />}
-        {section === "appearance" && <AppearanceSection look={props.look} onChange={props.onLook} />}
-        {section === "devices" && <DevicesSection token={props.token} onApprove={props.onApproveDevice} initialCode={props.linkCode} />}
-        {section === "backup" && <BackupSection {...props.backup} />}
-        {section === "privacy" && <PrivacySection {...props} />}
-        {section === "notifications" && <NotificationsSection onTestPush={props.onTestPush} />}
-      </section>
-    </>
+      </div>
+    );
+  }
+
+  return (
+    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto bg-card pb-6">
+      <button
+        onClick={() => setSection("profile")}
+        className="flex w-full items-center gap-4 border-b border-border px-4 py-4 text-left active:bg-secondary"
+      >
+        <UserAvatar user={{ ...user, online: false }} size={64} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[1.2em] font-medium">{user.name}</div>
+          <div className="truncate text-[.9em] text-muted-foreground">{user.status || user.phone}</div>
+        </div>
+        <Icon name="QrCode" size={22} className="text-primary" />
+      </button>
+      {SECTIONS.map(([id, label, icon, hint]) => (
+        <button
+          key={id}
+          onClick={() => setSection(id)}
+          className="flex w-full items-center gap-5 px-5 text-left active:bg-secondary"
+        >
+          <Icon name={icon} size={22} className="shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 py-3.5">
+            <span className="block">{label}</span>
+            <span className="block truncate text-[.85em] text-muted-foreground">{hint}</span>
+          </span>
+        </button>
+      ))}
+      <button
+        onClick={onLogout}
+        className="mt-2 flex w-full items-center gap-5 border-t border-border px-5 py-4 text-left text-destructive active:bg-secondary"
+      >
+        <Icon name="LogOut" size={22} className="shrink-0" />
+        Выйти из аккаунта
+      </button>
+      <p className="mt-6 text-center text-[.78em] text-muted-foreground">RuChat · защищено сквозным шифрованием</p>
+    </div>
   );
 }
 

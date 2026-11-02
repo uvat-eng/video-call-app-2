@@ -10,7 +10,7 @@ type Props = {
 export default function PushBanner({ state, onEnable, onClose }: Props) {
   if (state !== "default" && state !== "ios-install" && state !== "denied") return null;
   return (
-    <div className="mx-2.5 mt-2.5 flex flex-wrap items-center gap-3 rounded-[14px] bg-primary px-4 py-3 text-primary-foreground lg:mx-10">
+    <div className="flex flex-wrap items-center gap-3 bg-notice px-4 py-3 text-notice-foreground">
       <Icon name="BellRing" size={18} className="shrink-0" />
       <p className="min-w-0 flex-1 text-[.9em]">
         {state === "default" && "Включите уведомления, чтобы звонки и сообщения приходили, даже когда RuChat закрыт."}
@@ -22,7 +22,7 @@ export default function PushBanner({ state, onEnable, onClose }: Props) {
       {state === "default" && (
         <button
           onClick={onEnable}
-          className="h-9 rounded-full bg-primary-foreground px-4 font-head font-semibold text-primary transition-transform hover:scale-[1.03]"
+          className="h-9 rounded-full bg-primary px-4 font-semibold text-primary-foreground transition-transform active:scale-95"
         >
           Включить
         </button>

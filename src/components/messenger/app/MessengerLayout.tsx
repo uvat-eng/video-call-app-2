@@ -2,7 +2,7 @@ import Icon from "@/components/ui/icon";
 import { type User } from "@/lib/messenger-data";
 import GroupCreate from "../GroupCreate";
 import { type E2E } from "@/lib/e2e";
-import AppHeader from "../AppHeader";
+import BottomNav, { TopAction, TopBar } from "../AppHeader";
 import ChatList from "../ChatList";
 import ActiveChat from "../ActiveChat";
 import CallScreen from "../CallScreen";
@@ -12,7 +12,6 @@ import SettingsView from "../SettingsView";
 import PushBanner from "../PushBanner";
 import GroupCallScreen, { MAX_GROUP } from "../GroupCallScreen";
 import ContactPicker from "../ContactPicker";
-import { cn } from "@/lib/utils";
 import { biometricLabel } from "@/lib/biometric";
 import type { MessengerCore } from "./useMessengerCore";
 import type { MessengerActions } from "./useMessengerActions";
@@ -31,7 +30,6 @@ export default function MessengerLayout(props: Props) {
     setTab,
     chatsLoaded,
     historyLoaded,
-    activeId,
     mobileOpen,
     setMobileOpen,
     contacts,
@@ -90,117 +88,121 @@ export default function MessengerLayout(props: Props) {
     onLogout,
   } = props;
 
+  const unread = chats.reduce((n, c) => n + c.unread, 0);
+  const chatOpen = tab === "chats" && mobileOpen && !!active;
+
   return (
-    <div className="app-text flex h-[100dvh] flex-col overflow-hidden bg-background">
-      <AppHeader tab={tab} onTab={setTab} onNewCall={openGroupPicker} missed={missed} />
-      {!pushHidden && <PushBanner state={push} onEnable={enablePush} onClose={hidePush} />}
-      <main
-        className={cn(
-          "grid min-h-0 flex-1 gap-2.5 px-2.5 pb-4 pt-2.5 lg:grid-cols-[340px_1fr] lg:grid-rows-[minmax(0,1fr)] lg:px-10",
-          tab === "chats" ? "grid-rows-[minmax(0,1fr)]" : "auto-rows-min overflow-y-auto lg:overflow-hidden",
-        )}
-      >
-        {tab === "chats" && (
+    <div className="app-text h-[100dvh] overflow-hidden bg-muted">
+      <div className="relative mx-auto flex h-full max-w-[680px] flex-col overflow-hidden bg-card sm:shadow-xl">
+        {chatOpen && active ? (
+          <ActiveChat
+            key={active.id}
+            wallpaper={wallpaper}
+            peer={active.peer}
+            group={active.group}
+            me={me}
+            contacts={contacts}
+            uploading={uploading}
+            onSendPayload={sendPayload}
+            onSendFile={sendFile}
+            onGroupAction={groupAction}
+            onLoadContacts={loadContacts}
+            myKey={e2e.pub}
+            messages={activeMessages}
+            loading={!historyLoaded}
+            error={sendError}
+            onSend={send}
+            onCall={(k) =>
+              active.group
+                ? startGroup(
+                    active.group.members.filter((m) => m.id !== me.id && m.publicKey).slice(0, MAX_GROUP - 1),
+                    k,
+                  )
+                : startCall(active.peer, k)
+            }
+            onBack={() => setMobileOpen(false)}
+          />
+        ) : (
           <>
-            <ChatList
-              chats={chats}
-              activeId={activeId}
-              loaded={chatsLoaded}
-              onSelect={openChat}
-              onNew={() => setTab("contacts")}
-              onNewGroup={() => {
-                loadContacts();
-                setGroupCreate(true);
-              }}
-              className={cn(mobileOpen && active && "hidden lg:flex")}
+            <TopBar
+              tab={tab}
+              actions={
+                tab === "chats" ? (
+                  <TopAction
+                    icon="Users"
+                    label="Новая группа"
+                    onClick={() => {
+                      loadContacts();
+                      setGroupCreate(true);
+                    }}
+                  />
+                ) : tab === "calls" ? (
+                  <TopAction icon="PhoneCall" label="Групповой звонок" onClick={openGroupPicker} />
+                ) : null
+              }
             />
-            {active ? (
-              <ActiveChat
-                key={active.id}
-                wallpaper={wallpaper}
-                peer={active.peer}
-                group={active.group}
-                me={me}
-                contacts={contacts}
-                uploading={uploading}
-                onSendPayload={sendPayload}
-                onSendFile={sendFile}
-                onGroupAction={groupAction}
-                onLoadContacts={loadContacts}
-                myKey={e2e.pub}
-                messages={activeMessages}
-                loading={!historyLoaded}
-                error={sendError}
-                onSend={send}
-                onCall={(k) =>
-                  active.group
-                    ? startGroup(
-                        active.group.members.filter((m) => m.id !== me.id && m.publicKey).slice(0, MAX_GROUP - 1),
-                        k,
-                      )
-                    : startCall(active.peer, k)
-                }
-                onBack={() => setMobileOpen(false)}
-                className={cn(!mobileOpen && "hidden lg:grid")}
-              />
-            ) : (
-              <section className="hidden flex-col items-center justify-center gap-3 rounded-[14px] bg-card p-8 text-center lg:flex">
-                <span className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-tile-a to-tile-b">
-                  <Icon name="ShieldCheck" size={28} />
-                </span>
-                <h1 className="hero-title">Здравствуйте, {me.name.split(" ")[0]}</h1>
-                <p className="max-w-[440px] text-muted-foreground">
-                  Переписка и звонки защищены сквозным шифрованием: прочитать их можете только вы и собеседник.
-                </p>
+            {!pushHidden && <PushBanner state={push} onEnable={enablePush} onClose={hidePush} />}
+            <main className="relative flex min-h-0 flex-1 flex-col">
+              {tab === "chats" && (
+                <ChatList
+                  chats={chats}
+                  activeId={null}
+                  loaded={chatsLoaded}
+                  onSelect={openChat}
+                  onNew={() => setTab("contacts")}
+                />
+              )}
+              {tab === "calls" && (
+                <CallsView
+                  calls={calls}
+                  groupCalls={groupCalls}
+                  loaded={callsLoaded}
+                  onCall={startCall}
+                  onGroup={openGroupPicker}
+                />
+              )}
+              {tab === "contacts" && (
+                <ContactsView
+                  contacts={contacts}
+                  onCall={startCall}
+                  onMessage={openChatWith}
+                  onAdd={addContact}
+                  book={book}
+                  syncing={syncing}
+                  onSync={syncBook}
+                />
+              )}
+              {tab === "settings" && (
+                <SettingsView
+                  user={me}
+                  token={token}
+                  onAvatar={saveAvatar}
+                  onApproveDevice={approveDevice}
+                  look={look}
+                  onLook={changeLook}
+                  backup={backup}
+                  linkCode={linkCode}
+                  onSave={saveProfile}
+                  onLogout={onLogout}
+                  onClearHistory={clearHistory}
+                  onTestPush={testPush}
+                  bio={bioSupported ? { label: biometricLabel(), on: bioOn, toggle: toggleBio } : undefined}
+                />
+              )}
+              {(tab === "chats" || tab === "calls") && (
                 <button
-                  onClick={() => setTab("contacts")}
-                  className="mt-2 inline-flex h-[38px] items-center gap-2 rounded-full bg-primary px-[18px] font-head font-semibold text-primary-foreground"
+                  onClick={tab === "chats" ? () => setTab("contacts") : openGroupPicker}
+                  aria-label={tab === "chats" ? "Новый чат" : "Новый звонок"}
+                  className="absolute bottom-4 right-4 grid h-14 w-14 place-items-center rounded-2xl bg-badge text-badge-foreground shadow-lg transition-transform active:scale-95"
                 >
-                  <Icon name="UserPlus" size={16} />
-                  Добавить контакт
+                  <Icon name={tab === "chats" ? "MessageSquarePlus" : "PhonePlus"} size={24} />
                 </button>
-              </section>
-            )}
+              )}
+            </main>
+            <BottomNav tab={tab} onTab={setTab} missed={missed} unread={unread} />
           </>
         )}
-        {tab === "calls" && (
-          <CallsView
-            calls={calls}
-            groupCalls={groupCalls}
-            loaded={callsLoaded}
-            onCall={startCall}
-            onGroup={openGroupPicker}
-          />
-        )}
-        {tab === "contacts" && (
-          <ContactsView
-            contacts={contacts}
-            onCall={startCall}
-            onMessage={openChatWith}
-            onAdd={addContact}
-            book={book}
-            syncing={syncing}
-            onSync={syncBook}
-          />
-        )}
-        {tab === "settings" && (
-          <SettingsView
-            user={me}
-            token={token}
-            onAvatar={saveAvatar}
-            onApproveDevice={approveDevice}
-            look={look}
-            onLook={changeLook}
-            backup={backup}
-            linkCode={linkCode}
-            onSave={saveProfile}
-            onLogout={onLogout}
-            onClearHistory={clearHistory}
-            onTestPush={testPush}
-            bio={bioSupported ? { label: biometricLabel(), on: bioOn, toggle: toggleBio } : undefined}
-          />
-        )}
-      </main>
+      </div>
       {groupCreate && (
         <GroupCreate contacts={contacts} onCancel={() => setGroupCreate(false)} onCreate={createGroup} />
       )}

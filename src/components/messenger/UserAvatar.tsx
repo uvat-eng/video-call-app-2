@@ -22,8 +22,8 @@ export default function UserAvatar({ user, size = 42, className, ringClass = "bo
   return (
     <div
       className={cn(
-        "relative grid shrink-0 place-items-center rounded-full font-head font-semibold text-foreground",
-        !icon && !photo && (user.id % 2 === 0 ? "bg-tile-a" : "bg-tile-b"),
+        "relative grid shrink-0 place-items-center rounded-full font-semibold",
+        !icon && !photo && "bg-[#dfe5e7] text-[#8696a0] dark:bg-[#2a3942] dark:text-[#aebac1]",
         className,
       )}
       style={{ width: size, height: size, fontSize: Math.max(12, size * 0.34), background: bg }}
@@ -32,8 +32,10 @@ export default function UserAvatar({ user, size = 42, className, ringClass = "bo
         <img src={photo} alt={user.name} className="h-full w-full rounded-full object-cover" loading="lazy" />
       ) : icon ? (
         <Icon name={icon[1]} size={Math.round(size * 0.52)} className="text-white" fallback="Smile" />
-      ) : (
+      ) : initials(user.name).trim() ? (
         initials(user.name)
+      ) : (
+        <Icon name="User" size={Math.round(size * 0.55)} />
       )}
       {user.online && !hideOnline && (
         <i

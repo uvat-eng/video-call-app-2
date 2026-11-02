@@ -56,7 +56,7 @@ export default function CallStage({ call, session }: Props) {
               <UserAvatar user={call.peer} hideOnline size={128} className="relative" />
             </div>
             <div className="relative">
-              <h2 className="hero-title">{call.peer.name}</h2>
+              <h2 className="hero-title text-[2em]">{call.peer.name}</h2>
               <p
                 className={cn(
                   "mt-2 font-head text-[1.1em] tabular-nums",

@@ -94,7 +94,7 @@ export default function GroupCallScreen({ group, me, token, e2e, contacts, onClo
               {group.incoming && <UserAvatar user={group.incoming.host} hideOnline size={128} className="relative" />}
             </div>
             <div>
-              <h2 className="hero-title">{group.incoming?.host.name ?? "Групповой звонок"}</h2>
+              <h2 className="hero-title text-[2em]">{group.incoming?.host.name ?? "Групповой звонок"}</h2>
               <p className={cn("mt-2 font-head text-[1.1em]", isVideo ? "text-primary-foreground/70" : "text-muted-foreground")}>
                 {phase === "ended"
                   ? endText

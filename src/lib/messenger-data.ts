@@ -144,6 +144,15 @@ export function shortTime(iso?: string | null) {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 }
 
+export function dayLabel(iso?: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const diff = dayDiff(d);
+  if (diff === 0) return "Сегодня";
+  if (diff === 1) return "Вчера";
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+}
+
 export function longTime(iso?: string | null) {
   if (!iso) return "";
   const d = new Date(iso);

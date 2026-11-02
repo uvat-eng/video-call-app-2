@@ -13,53 +13,82 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "settings", label: "Настройки", icon: "Settings" },
 ];
 
+const TITLES: Record<Tab, string> = {
+  chats: "RuChat",
+  calls: "Звонки",
+  contacts: "Контакты",
+  settings: "Настройки",
+};
+
+export function TopBar({ tab, actions }: { tab: Tab; actions?: React.ReactNode }) {
+  return (
+    <header className="pt-safe shrink-0 bg-card">
+      <div className="flex h-14 items-center justify-between gap-3 px-4">
+        <h1
+          className={cn(
+            "truncate text-[1.45em] font-semibold tracking-[-0.01em]",
+            tab === "chats" ? "text-primary" : "text-foreground",
+          )}
+        >
+          {TITLES[tab]}
+        </h1>
+        <div className="flex items-center gap-1 text-foreground">{actions}</div>
+      </div>
+    </header>
+  );
+}
+
+export function TopAction({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="grid h-10 w-10 place-items-center rounded-full transition-colors hover:bg-secondary active:bg-border"
+    >
+      <Icon name={icon} size={21} />
+    </button>
+  );
+}
+
 type Props = {
   tab: Tab;
   onTab: (t: Tab) => void;
-  onNewCall: () => void;
   missed: number;
+  unread: number;
 };
 
-export default function AppHeader({ tab, onTab, onNewCall, missed }: Props) {
+export default function BottomNav({ tab, onTab, missed, unread }: Props) {
   return (
-    <header className="flex h-[58px] shrink-0 items-center justify-between gap-3 border-b border-border px-4 lg:px-10">
-      <div className="flex items-center gap-2.5 font-head text-[1.2em] font-semibold tracking-[-0.03em]">
-        <span className="rounded-lg bg-logo-bg px-1 py-0.5">
-          <img src={LOGO_URL} alt="RuChat" className="h-7 w-auto" />
-        </span>
-        RuChat
-      </div>
-      <nav className="flex items-center gap-1 text-muted-foreground lg:gap-[22px]">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => onTab(t.id)}
-            aria-label={t.label}
-            className={cn(
-              "relative flex items-center gap-1.5 rounded-full px-2.5 py-1.5 transition-colors hover:text-foreground lg:px-0",
-              tab === t.id && "text-foreground",
-            )}
-          >
-            <Icon name={t.icon} size={18} className="lg:hidden" />
-            <span className="hidden lg:inline">{t.label}</span>
-            {t.id === "calls" && missed > 0 && (
-              <span className="absolute -right-0.5 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground lg:-right-3 lg:-top-1">
-                {missed}
+    <nav className="pb-safe shrink-0 border-t border-border bg-card">
+      <div className="grid h-[64px] grid-cols-4">
+        {TABS.map((t) => {
+          const on = tab === t.id;
+          const count = t.id === "chats" ? unread : t.id === "calls" ? missed : 0;
+          return (
+            <button
+              key={t.id}
+              onClick={() => onTab(t.id)}
+              className="flex flex-col items-center justify-center gap-1 text-[.72em] font-medium"
+            >
+              <span
+                className={cn(
+                  "relative grid h-8 w-14 place-items-center rounded-full transition-colors",
+                  on ? "bg-accent text-foreground" : "text-muted-foreground",
+                )}
+              >
+                <Icon name={t.icon} size={21} strokeWidth={on ? 2.4 : 2} />
+                {count > 0 && (
+                  <span className="absolute -top-1 right-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-badge px-1 text-[11px] font-semibold leading-none text-badge-foreground">
+                    {count > 99 ? "99+" : count}
+                  </span>
+                )}
               </span>
-            )}
-            {tab === t.id && (
-              <span className="absolute -bottom-[13px] left-0 right-0 hidden h-[2px] rounded-full bg-primary lg:block" />
-            )}
-          </button>
-        ))}
-        <button
-          onClick={onNewCall}
-          className="ml-1 inline-flex h-[38px] items-center gap-2 rounded-full bg-primary px-3.5 font-head font-semibold text-primary-foreground transition-transform hover:scale-[1.03] active:scale-95 lg:ml-0 lg:px-[18px]"
-        >
-          <Icon name="PhoneCall" size={16} />
-          <span className="hidden sm:inline">Новый звонок</span>
-        </button>
-      </nav>
-    </header>
+              <span className={on ? "text-foreground" : "text-muted-foreground"}>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
   );
 }

@@ -36,131 +36,106 @@ export default function CallsView({ calls, groupCalls, loaded, onCall, onGroup }
   const totalMin = Math.round(all.reduce((s, c) => s + c.seconds, 0) / 60);
 
   return (
-    <>
-      <aside className="flex min-h-0 flex-col gap-2.5">
-        <div className="rounded-[14px] bg-primary p-5 text-primary-foreground">
-          <div className="text-[.8em] opacity-70">Всего звонков</div>
-          <div className="font-head text-[2.6em] font-semibold leading-none tracking-[-0.04em]">{all.length}</div>
+    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto bg-card pb-24">
+      <div className="flex gap-2 px-4 pb-2 text-[.88em]">
+        {(
+          [
+            ["all", "Все"],
+            ["missed", missed ? `Пропущенные ${missed}` : "Пропущенные"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setFilter(id)}
+            className={cn(
+              "rounded-full px-3.5 py-1.5 font-medium transition-colors",
+              filter === id ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <button onClick={onGroup} className="flex w-full items-center gap-3 px-4 py-2.5 text-left active:bg-secondary">
+        <span className="grid h-[50px] w-[50px] shrink-0 place-items-center rounded-full bg-badge text-badge-foreground">
+          <Icon name="Link" size={22} />
+        </span>
+        <span className="min-w-0">
+          <span className="block font-medium">Групповой звонок</span>
+          <span className="block text-[.88em] text-muted-foreground">До 20 человек, видео до 6</span>
+        </span>
+      </button>
+      <div className="px-4 pb-1 pt-4 font-medium">Недавние</div>
+      {!loaded && (
+        <div className="grid place-items-center py-10 text-muted-foreground">
+          <Icon name="Loader2" size={22} className="animate-spin" />
         </div>
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="rounded-[14px] bg-card p-4">
-            <div className="text-[.8em] text-muted-foreground">Видео</div>
-            <div className="font-head text-[1.8em] font-semibold leading-none">{video}</div>
-          </div>
-          <div className="rounded-[14px] bg-card p-4">
-            <div className="text-[.8em] text-muted-foreground">Пропущено</div>
-            <div className="font-head text-[1.8em] font-semibold leading-none text-destructive">{missed}</div>
-          </div>
-        </div>
-        <button
-          onClick={onGroup}
-          className="flex items-center justify-between rounded-[14px] bg-card p-5 text-left transition-transform hover:scale-[1.01]"
-        >
-          <div>
-            <div className="font-head font-semibold">Групповой звонок</div>
-            <div className="text-[.85em] text-muted-foreground">До 20 человек, видео до 6</div>
-          </div>
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-primary text-primary-foreground">
-            <Icon name="Users" size={18} />
+      )}
+      {loaded && list.length === 0 && (
+        <p className="px-4 py-10 text-center text-muted-foreground">
+          {filter === "missed" ? "Пропущенных нет" : "Звонков пока не было"}
+        </p>
+      )}
+      {list.map((c) => {
+        const d = DIR[c.direction];
+        const dur = duration(c.seconds);
+        const isMissed = c.direction === "missed";
+        const sub = (
+          <span className="flex items-center gap-1.5 truncate text-[.88em] text-muted-foreground">
+            <Icon
+              name={d.icon}
+              size={15}
+              className={cn("shrink-0", isMissed ? "text-destructive" : "text-badge")}
+            />
+            <span className="truncate">
+              {c.group ? `Группа · ${c.total} участн. · ` : ""}
+              {longTime(c.at)}
+              {dur && ` · ${dur}`}
+            </span>
           </span>
-        </button>
-        <div className="rounded-[14px] bg-gradient-to-br from-tile-a to-tile-b p-5">
-          <div className="text-[.8em] text-muted-foreground">Вместе на связи</div>
-          <div className="font-head text-[1.8em] font-semibold leading-none">{totalMin} мин</div>
-        </div>
-      </aside>
-
-      <section className="flex min-h-0 flex-col overflow-hidden rounded-[14px] bg-card p-5 lg:p-7">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="hero-title">Звонки</h1>
-          <div className="flex gap-1.5 text-[.85em]">
-            {(
-              [
-                ["all", "Все"],
-                ["missed", "Пропущенные"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setFilter(id)}
-                className={cn(
-                  "rounded-full px-4 py-1.5 font-medium",
-                  filter === id ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="scroll-thin min-h-0 flex-1 divide-y divide-border overflow-y-auto">
-          {!loaded && (
-            <div className="grid place-items-center py-10 text-muted-foreground">
-              <Icon name="Loader2" size={20} className="animate-spin" />
-            </div>
-          )}
-          {loaded && list.length === 0 && (
-            <p className="py-10 text-center text-muted-foreground">
-              {filter === "missed" ? "Пропущенных нет" : "Звонков пока не было"}
-            </p>
-          )}
-          {list.map((c) => {
-            const d = DIR[c.direction];
-            const dur = duration(c.seconds);
-            if (c.group) {
-              return (
-                <div key={`g${c.id}`} className="grid grid-cols-[42px_1fr_auto] items-center gap-3 py-3">
-                  <span className="grid h-[42px] w-[42px] place-items-center rounded-full bg-gradient-to-br from-tile-a to-tile-b">
-                    <Icon name="Users" size={18} />
-                  </span>
-                  <div className="min-w-0">
-                    <div className={cn("truncate font-medium", c.direction === "missed" && "text-destructive")}>
-                      {c.names || "Групповой звонок"}
-                    </div>
-                    <div className="flex items-center gap-1.5 truncate text-[.85em] text-muted-foreground">
-                      <Icon name={d.icon} size={14} />
-                      Группа · {c.total} участн. · {c.kind === "video" ? "видео" : "аудио"} · {longTime(c.at)}
-                      {dur && ` · ${dur}`}
-                    </div>
+        );
+        if (c.group) {
+          return (
+            <div key={`g${c.id}`} className="flex items-center gap-3 px-4">
+              <span className="grid h-[50px] w-[50px] shrink-0 place-items-center rounded-full bg-secondary text-muted-foreground">
+                <Icon name="Users" size={24} />
+              </span>
+              <div className="flex min-w-0 flex-1 items-center gap-2 border-b border-border py-3">
+                <div className="min-w-0 flex-1">
+                  <div className={cn("truncate font-medium", isMissed && "text-destructive")}>
+                    {c.names || "Групповой звонок"}
                   </div>
-                  <span />
+                  {sub}
                 </div>
-              );
-            }
-            return (
-              <div key={c.id} className="grid grid-cols-[42px_1fr_auto] items-center gap-3 py-3">
-                <UserAvatar user={c.peer} />
-                <div className="min-w-0">
-                  <div className={cn("truncate font-medium", c.direction === "missed" && "text-destructive")}>
-                    {c.peer.name}
-                  </div>
-                  <div className="flex items-center gap-1.5 truncate text-[.85em] text-muted-foreground">
-                    <Icon name={d.icon} size={14} />
-                    {d.label} · {c.kind === "video" ? "видео" : "аудио"} · {longTime(c.at)}
-                    {dur && ` · ${dur}`}
-                  </div>
-                </div>
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => onCall(c.peer, "audio")}
-                    aria-label="Аудиозвонок"
-                    className="grid h-9 w-9 place-items-center rounded-full bg-secondary transition-colors hover:bg-accent"
-                  >
-                    <Icon name="Phone" size={16} />
-                  </button>
-                  <button
-                    onClick={() => onCall(c.peer, "video")}
-                    aria-label="Видеозвонок"
-                    className="grid h-9 w-9 place-items-center rounded-full bg-primary text-primary-foreground transition-transform hover:scale-105"
-                  >
-                    <Icon name="Video" size={16} />
-                  </button>
-                </div>
+                <Icon name={c.kind === "video" ? "Video" : "Phone"} size={20} className="shrink-0 text-muted-foreground" />
               </div>
-            );
-          })}
-        </div>
-      </section>
-    </>
+            </div>
+          );
+        }
+        return (
+          <div key={c.id} className="flex items-center gap-3 px-4">
+            <UserAvatar user={c.peer} size={50} />
+            <div className="flex min-w-0 flex-1 items-center gap-2 border-b border-border py-3">
+              <div className="min-w-0 flex-1">
+                <div className={cn("truncate font-medium", isMissed && "text-destructive")}>{c.peer.name}</div>
+                {sub}
+              </div>
+              <button
+                onClick={() => onCall(c.peer, c.kind)}
+                aria-label={c.kind === "video" ? "Видеозвонок" : "Аудиозвонок"}
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-foreground active:bg-secondary"
+              >
+                <Icon name={c.kind === "video" ? "Video" : "Phone"} size={21} />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      {loaded && all.length > 0 && (
+        <p className="px-6 py-5 text-center text-[.78em] text-muted-foreground">
+          Всего {all.length} · видео {video} · вместе на связи {totalMin} мин
+        </p>
+      )}
+    </div>
   );
 }

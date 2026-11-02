@@ -25,7 +25,7 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd, book,
   const q = query.trim().toLowerCase();
   const list = contacts.filter((c) => !q || c.name.toLowerCase().includes(q) || c.phone.includes(q));
   const online = contacts.filter((c) => c.online).length;
-  const selected = contacts.find((c) => c.id === selectedId) ?? contacts[0];
+  const selected = contacts.find((c) => c.id === selectedId);
 
   const [inviteTo, setInviteTo] = useState("");
   const [added, setAdded] = useState("");
@@ -44,7 +44,7 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd, book,
       setAddError(error);
       if (error.includes("нет в RuChat")) setInviteTo(phone);
     } else {
-      setAdded("Контакт добавлен — он появился в списке слева");
+      setAdded("Контакт добавлен");
       setPhone("");
     }
   };
@@ -56,51 +56,25 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd, book,
   };
 
   return (
-    <>
-      <aside className="flex min-h-0 flex-col overflow-hidden rounded-[14px] bg-card px-2.5 py-[18px]">
-        <div className="flex items-baseline justify-between px-2.5 pb-3">
-          <h2 className="text-[1.6em] font-semibold tracking-[-0.03em]">Контакты</h2>
-          <span className="text-[.8em] text-muted-foreground">{online} в сети</span>
-        </div>
-        <label className="mx-2.5 mb-2.5 flex h-[38px] items-center gap-2 rounded-full bg-background px-4 text-[.93em] text-muted-foreground">
-          <Icon name="Search" size={16} />
+    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto bg-card pb-6">
+      <div className="px-4 pb-2">
+        <label className="flex h-10 items-center gap-3 rounded-full bg-secondary px-4 text-muted-foreground">
+          <Icon name="Search" size={18} />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Найти контакт"
+            placeholder="Поиск по имени или номеру"
             className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
           />
         </label>
-        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-          {contacts.length === 0 && (
-            <p className="px-2.5 py-8 text-center text-[.87em] text-muted-foreground">
-              Добавьте первого человека по номеру телефона
-            </p>
-          )}
-          {list.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setSelectedId(c.id)}
-              className={`grid w-full grid-cols-[42px_1fr] items-center gap-3 rounded-xl p-2.5 text-left transition-colors ${
-                selected?.id === c.id ? "bg-background" : "hover:bg-background/60"
-              }`}
-            >
-              <UserAvatar user={c} />
-              <div className="min-w-0">
-                <div className="truncate font-medium">{bookName(c) ?? c.name}</div>
-                <div className="truncate text-[.85em] text-muted-foreground">{presence(c)}</div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </aside>
+      </div>
 
-      <section className="grid min-h-0 auto-rows-min gap-2.5 overflow-y-auto md:grid-cols-2">
-        <PhonebookPanel book={book} syncing={syncing} onSync={onSync} onMessage={onMessage} onCall={onCall} />
-        <form onSubmit={add} className="rounded-[14px] bg-gradient-to-br from-tile-a to-tile-b p-5 md:col-span-2 lg:p-6">
-          <div className="font-head text-[1.1em] font-semibold">Добавить контакт</div>
-          <p className="mb-3 text-[.85em] text-muted-foreground">Человек должен быть зарегистрирован в RuChat</p>
-          <div className="flex flex-wrap gap-2">
+      <form onSubmit={add} className="px-4 py-2">
+        <div className="flex items-center gap-3">
+          <span className="grid h-[50px] w-[50px] shrink-0 place-items-center rounded-full bg-badge text-badge-foreground">
+            <Icon name="UserPlus" size={22} />
+          </span>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <input
               value={phone}
               onChange={(e) => {
@@ -109,74 +83,84 @@ export default function ContactsView({ contacts, onCall, onMessage, onAdd, book,
                 setInviteTo("");
               }}
               type="tel"
-              placeholder="+7 900 000-00-00"
-              className="h-[42px] min-w-0 flex-1 rounded-full bg-card px-[18px] outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/20"
+              placeholder="Новый контакт: +7 900 000-00-00"
+              className="h-10 min-w-0 flex-1 rounded-full bg-secondary px-4 outline-none placeholder:text-muted-foreground"
             />
             <button
-              disabled={adding}
-              className="inline-flex h-[42px] items-center gap-2 rounded-full bg-primary px-[18px] font-head font-semibold text-primary-foreground disabled:opacity-60"
+              disabled={adding || !phone.trim()}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-40"
+              aria-label="Добавить"
             >
-              <Icon name={adding ? "Loader2" : "UserPlus"} size={16} className={adding ? "animate-spin" : ""} />
-              Добавить
+              <Icon name={adding ? "Loader2" : "Check"} size={18} className={adding ? "animate-spin" : ""} />
             </button>
           </div>
-          {addError && <p className="mt-2 text-[.85em] text-destructive">{addError}</p>}
-          {added && <p className="mt-2 text-[.85em] text-foreground">{added}</p>}
-          {inviteTo && (
-            <button
-              type="button"
-              onClick={sendInvite}
-              className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-full bg-card px-4 text-[.85em] font-medium hover:bg-background"
-            >
-              <Icon name="Send" size={14} />
-              Пригласить по СМС
-            </button>
-          )}
-        </form>
-
-        {selected && (
-          <>
-            <div className="flex flex-col items-start gap-4 rounded-[14px] bg-card p-6 md:col-span-2 lg:p-7">
-              <UserAvatar user={selected} size={84} />
-              <div>
-                <h1 className="hero-title">{selected.name}</h1>
-                <p className="mt-2 text-muted-foreground">{presence(selected)}</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => onCall(selected, "video")}
-                  className="inline-flex h-[38px] items-center gap-2 rounded-full bg-primary px-[18px] font-head font-semibold text-primary-foreground"
-                >
-                  <Icon name="Video" size={16} />
-                  Видеозвонок
-                </button>
-                <button
-                  onClick={() => onCall(selected, "audio")}
-                  className="inline-flex h-[38px] items-center gap-2 rounded-full bg-secondary px-[18px] font-head font-semibold text-secondary-foreground"
-                >
-                  <Icon name="Phone" size={16} />
-                  Аудиозвонок
-                </button>
-                <button
-                  onClick={() => onMessage(selected)}
-                  className="inline-flex h-[38px] items-center gap-2 rounded-full bg-secondary px-[18px] font-head font-semibold text-secondary-foreground"
-                >
-                  <Icon name="MessageCircle" size={16} />
-                  Написать
-                </button>
-              </div>
-            </div>
-            <div className="rounded-[14px] bg-card p-5">
-              <div className="text-[.8em] text-muted-foreground">Телефон</div>
-              <div className="mt-1 font-medium">{selected.phone}</div>
-            </div>
-            <div className="rounded-[14px] bg-card p-5">
-              <div className="text-[.8em] text-muted-foreground">Статус</div>
-              <div className="mt-1 font-medium">{selected.status || "—"}</div>
-            </div>
-          </>
+        </div>
+        {addError && <p className="mt-2 pl-[62px] text-[.85em] text-destructive">{addError}</p>}
+        {added && <p className="mt-2 pl-[62px] text-[.85em] text-primary">{added}</p>}
+        {inviteTo && (
+          <button
+            type="button"
+            onClick={sendInvite}
+            className="ml-[62px] mt-2 inline-flex h-9 items-center gap-1.5 rounded-full bg-accent px-4 text-[.85em] font-medium text-accent-foreground"
+          >
+            <Icon name="Send" size={14} />
+            Пригласить по СМС
+          </button>
         )}
-      </section>
-    </>
+      </form>
+
+      <div className="flex items-baseline justify-between px-4 pb-1 pt-3">
+        <span className="font-medium">Контакты в RuChat</span>
+        <span className="text-[.8em] text-muted-foreground">{online} в сети</span>
+      </div>
+      {contacts.length === 0 && (
+        <p className="px-4 py-6 text-center text-muted-foreground">Добавьте первого человека по номеру телефона</p>
+      )}
+      {list.map((c) => {
+        const open = selected?.id === c.id && selectedId !== null;
+        return (
+          <div key={c.id}>
+            <div className="flex items-center gap-3 px-4">
+              <button onClick={() => setSelectedId(open ? null : c.id)} aria-label="Подробнее">
+                <UserAvatar user={c} size={50} />
+              </button>
+              <div className="flex min-w-0 flex-1 items-center gap-1 border-b border-border py-3">
+                <button onClick={() => onMessage(c)} className="min-w-0 flex-1 text-left">
+                  <div className="truncate font-medium">{bookName(c) ?? c.name}</div>
+                  <div className="truncate text-[.88em] text-muted-foreground">{c.status || presence(c)}</div>
+                </button>
+                <button
+                  onClick={() => onCall(c, "audio")}
+                  aria-label="Аудиозвонок"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full active:bg-secondary"
+                >
+                  <Icon name="Phone" size={20} />
+                </button>
+                <button
+                  onClick={() => onCall(c, "video")}
+                  aria-label="Видеозвонок"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full active:bg-secondary"
+                >
+                  <Icon name="Video" size={21} />
+                </button>
+              </div>
+            </div>
+            {open && (
+              <div className="mx-4 mb-2 mt-1 rounded-xl bg-secondary p-4 text-[.9em]">
+                <div className="text-muted-foreground">Телефон</div>
+                <div className="font-medium">{c.phone}</div>
+                <div className="mt-2 text-muted-foreground">Статус</div>
+                <div className="font-medium">{c.status || "—"}</div>
+                <div className="mt-2 text-muted-foreground">{presence(c)}</div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <div className="mt-4">
+        <PhonebookPanel book={book} syncing={syncing} onSync={onSync} onMessage={onMessage} onCall={onCall} />
+      </div>
+    </div>
   );
 }

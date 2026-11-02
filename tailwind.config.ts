@@ -19,13 +19,17 @@ export default {
 		},
 		extend: {
 			fontFamily: {
-				head: ['"Inter Tight"', 'sans-serif'],
-				body: ['Inter', 'sans-serif'],
+				head: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+				body: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
 			},
 			colors: {
 				'tile-a': 'hsl(var(--tile-a))',
 				'tile-b': 'hsl(var(--tile-b))',
 				online: 'hsl(var(--online))',
+				badge: { DEFAULT: 'hsl(var(--badge))', foreground: 'hsl(var(--badge-foreground))' },
+				notice: { DEFAULT: 'hsl(var(--notice))', foreground: 'hsl(var(--notice-foreground))' },
+				tick: 'hsl(var(--tick))',
+				'chat-bg': 'hsl(var(--chat-bg))',
 				'logo-bg': 'hsl(var(--logo-bg))',
 				border: 'hsl(var(--border))',
 				input: 'hsl(var(--input))',

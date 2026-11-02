@@ -91,10 +91,10 @@ export default function PhonebookPanel({ book, syncing, onSync, onMessage, onCal
   const mainLabel = book.length ? "Обновить" : mode === "file" ? "Загрузить контакты" : "Найти друзей";
 
   return (
-    <div className="rounded-[14px] bg-card p-5 md:col-span-2 lg:p-6">
+    <div className="border-t-8 border-secondary px-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 font-head text-[1.1em] font-semibold">
+          <div className="flex items-center gap-2 font-medium">
             <Icon name="BookUser" size={18} />
             Контакты телефона
           </div>
@@ -108,7 +108,7 @@ export default function PhonebookPanel({ book, syncing, onSync, onMessage, onCal
           <button
             onClick={mainAction}
             disabled={syncing}
-            className="inline-flex h-[38px] items-center gap-2 rounded-full bg-primary px-[18px] font-head font-semibold text-primary-foreground disabled:opacity-60"
+            className="inline-flex h-[38px] items-center gap-2 rounded-full bg-primary px-[18px] font-medium text-primary-foreground disabled:opacity-60"
           >
             <Icon
               name={syncing ? "Loader2" : book.length ? "RefreshCw" : "Users"}
@@ -122,7 +122,7 @@ export default function PhonebookPanel({ book, syncing, onSync, onMessage, onCal
       </div>
 
       {!book.length && mode && (
-        <div className="mt-4 rounded-xl bg-gradient-to-br from-tile-a to-tile-b p-4 text-[.85em] leading-relaxed">
+        <div className="mt-4 rounded-xl bg-secondary p-4 text-[.85em] leading-relaxed">
           {mode === "native" && <>Нажмите «Найти друзей» и разрешите доступ к контактам — RuChat сам покажет, кто уже здесь.</>}
           {mode === "picker" && <>Нажмите «Найти друзей», затем «Выбрать все» в открывшемся списке.</>}
           {mode === "file" && ios && (
@@ -145,7 +145,7 @@ export default function PhonebookPanel({ book, syncing, onSync, onMessage, onCal
       {error && <p className="mt-3 text-[.85em] text-destructive">{error}</p>}
 
       {book.length > 12 && (
-        <label className="mt-4 flex h-[38px] items-center gap-2 rounded-full bg-background px-4 text-[.93em] text-muted-foreground">
+        <label className="mt-4 flex h-10 items-center gap-2 rounded-full bg-secondary px-4 text-[.93em] text-muted-foreground">
           <Icon name="Search" size={16} />
           <input
             value={filter}

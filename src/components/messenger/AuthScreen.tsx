@@ -41,18 +41,17 @@ export default function AuthScreen({ onAuth, notice }: Props) {
   return (
     <div className="app-text grid min-h-[100dvh] place-items-center bg-background p-2.5">
       <div className="grid w-full max-w-[900px] gap-2.5 md:grid-cols-[1fr_400px]">
-        <div className="flex flex-col justify-between gap-8 rounded-[14px] bg-gradient-to-br from-tile-a to-tile-b p-7 lg:p-9">
+        <div className="flex flex-col justify-between gap-8 rounded-[14px] bg-card p-7 lg:p-9">
           <div className="flex items-center gap-2.5 font-head text-[1.2em] font-semibold tracking-[-0.03em]">
             <span className="rounded-lg bg-logo-bg px-1 py-0.5">
               <img src={LOGO_URL} alt="RuChat" className="h-8 w-auto" />
             </span>
           </div>
           <div>
-            <h1 className="hero-title">RuChat</h1>
+            <h1 className="hero-title text-[2.2em] text-primary">RuChat</h1>
             <p className="mt-3 font-head text-[1.15em] font-semibold">Защищённый российский мессенджер.</p>
             <p className="mt-2 text-muted-foreground">
-              Без посредников и перехватов информации. Связь между двумя телефонами абонентов, без хранения переписки на
-              серверах.
+              Сквозное шифрование сообщений и звонков: прочитать переписку можете только вы и собеседник.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-[.85em]">

@@ -4,85 +4,88 @@
 
 @layer base {
   :root {
-    /* RuChat — палитра «Шалфей» */
-    --background: 96 15.2% 93.5%;
-    --foreground: 135 14.3% 11%;
-
+    --background: 216 20% 95%;
+    --foreground: 202 32% 10%;
     --card: 0 0% 100%;
-    --card-foreground: 135 14.3% 11%;
-
+    --card-foreground: 202 32% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 135 14.3% 11%;
-
-    --primary: 146.7 30.3% 17.5%;
+    --popover-foreground: 202 32% 10%;
+    --primary: 169 100% 25%;
     --primary-foreground: 0 0% 100%;
-
-    --secondary: 97.5 14.8% 89.4%;
-    --secondary-foreground: 135 14.3% 11%;
-
-    --muted: 96 15.2% 93.5%;
-    --muted-foreground: 125.5 4.5% 52%;
-
-    --accent: 110.9 38.7% 73.1%;
-    --accent-foreground: 117 40% 9.8%;
-
-    --destructive: 4.9 67.5% 54.1%;
+    --secondary: 216 20% 95%;
+    --secondary-foreground: 202 32% 10%;
+    --muted: 216 20% 95%;
+    --muted-foreground: 202 12% 45%;
+    --accent: 111 91% 91%;
+    --accent-foreground: 202 32% 10%;
+    --destructive: 346 100% 46%;
     --destructive-foreground: 0 0% 100%;
+    --border: 200 16% 91%;
+    --input: 200 16% 91%;
+    --ring: 169 100% 25%;
+    --radius: 10px;
 
-    --border: 97.5 12.1% 87.1%;
-    --input: 97.5 12.1% 87.1%;
-    --ring: 146.7 30.3% 17.5%;
-
-    --radius: 14px;
-
-    /* Дополнительные токены макета */
-    --tile-a: 104.3 35.4% 87.3%;
-    --tile-b: 93.3 19.1% 90.8%;
-    --online: 140.9 51.4% 49.2%;
+    --tile-a: 110 81% 92%;
+    --tile-b: 216 20% 95%;
+    --online: 142 70% 42%;
     --logo-bg: 24 29.4% 3.3%;
+    --badge: 149 71% 39%;
+    --badge-foreground: 0 0% 100%;
+    --chat-bg: 37 29% 91%;
+    --bubble-in: 0 0% 100%;
+    --notice: 41 100% 90%;
+    --notice-foreground: 30 30% 25%;
+    --tick: 198 79% 52%;
 
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 135 14.3% 11%;
-    --sidebar-primary: 146.7 30.3% 17.5%;
+    --sidebar-foreground: 202 32% 10%;
+    --sidebar-primary: 169 100% 25%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 96 15.2% 93.5%;
-    --sidebar-accent-foreground: 135 14.3% 11%;
-    --sidebar-border: 97.5 12.1% 87.1%;
-    --sidebar-ring: 146.7 30.3% 17.5%;
+    --sidebar-accent: 216 20% 95%;
+    --sidebar-accent-foreground: 202 32% 10%;
+    --sidebar-border: 200 16% 91%;
+    --sidebar-ring: 169 100% 25%;
   }
 
   .dark {
-    --background: 140 12% 8%;
-    --foreground: 96 15% 93%;
-    --card: 140 11% 12%;
-    --card-foreground: 96 15% 93%;
-    --popover: 140 11% 12%;
-    --popover-foreground: 96 15% 93%;
-    --primary: 110.9 38.7% 73.1%;
-    --primary-foreground: 117 40% 9.8%;
-    --secondary: 140 9% 18%;
-    --secondary-foreground: 96 15% 93%;
-    --muted: 140 9% 16%;
-    --muted-foreground: 125 6% 62%;
-    --accent: 146.7 30.3% 24%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 4.9 60% 48%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 140 9% 20%;
-    --input: 140 9% 20%;
-    --ring: 110.9 38.7% 73.1%;
-    --tile-a: 146 25% 20%;
-    --tile-b: 140 10% 18%;
-    --online: 140.9 51.4% 49.2%;
+    --background: 202 23% 16%;
+    --foreground: 200 16% 93%;
+    --card: 202 32% 10%;
+    --card-foreground: 200 16% 93%;
+    --popover: 202 23% 16%;
+    --popover-foreground: 200 16% 93%;
+    --primary: 167 100% 33%;
+    --primary-foreground: 202 32% 10%;
+    --secondary: 202 23% 16%;
+    --secondary-foreground: 200 16% 93%;
+    --muted: 202 23% 16%;
+    --muted-foreground: 203 12% 62%;
+    --accent: 169 100% 18%;
+    --accent-foreground: 200 16% 95%;
+    --destructive: 353 84% 65%;
+    --destructive-foreground: 202 32% 10%;
+    --border: 203 21% 19%;
+    --input: 203 21% 19%;
+    --ring: 167 100% 33%;
+    --tile-a: 161 54% 14%;
+    --tile-b: 202 23% 16%;
+    --online: 145 71% 44%;
     --logo-bg: 24 29.4% 3.3%;
-    --sidebar-background: 140 11% 12%;
-    --sidebar-foreground: 96 15% 93%;
-    --sidebar-primary: 110.9 38.7% 73.1%;
-    --sidebar-primary-foreground: 117 40% 9.8%;
-    --sidebar-accent: 140 9% 16%;
-    --sidebar-accent-foreground: 96 15% 93%;
-    --sidebar-border: 140 9% 20%;
-    --sidebar-ring: 110.9 38.7% 73.1%;
+    --badge: 145 71% 44%;
+    --badge-foreground: 202 32% 10%;
+    --chat-bg: 204 41% 7%;
+    --bubble-in: 202 23% 16%;
+    --notice: 202 25% 13%;
+    --notice-foreground: 43 100% 74%;
+    --tick: 198 79% 62%;
+    --sidebar-background: 202 32% 10%;
+    --sidebar-foreground: 200 16% 93%;
+    --sidebar-primary: 167 100% 33%;
+    --sidebar-primary-foreground: 202 32% 10%;
+    --sidebar-accent: 202 23% 16%;
+    --sidebar-accent-foreground: 200 16% 93%;
+    --sidebar-border: 203 21% 19%;
+    --sidebar-ring: 167 100% 33%;
   }
 }
 
@@ -98,7 +101,6 @@
 
   body {
     @apply bg-background text-foreground font-body antialiased;
-    letter-spacing: -0.01em;
   }
 
   h1,
@@ -110,17 +112,7 @@
 
 @layer components {
   .app-text {
-    font-size: calc(15px * var(--app-scale, 1));
-  }
-  @media (min-width: 1024px) {
-    .app-text {
-      font-size: calc(17px * var(--app-scale, 1));
-    }
-  }
-  @media (min-width: 1440px) {
-    .app-text {
-      font-size: calc(19px * var(--app-scale, 1));
-    }
+    font-size: calc(16px * var(--app-scale, 1));
   }
 
   .bubble-mine {
@@ -128,25 +120,29 @@
     color: var(--bubble-fg, hsl(var(--accent-foreground)));
   }
   .bubble-peer {
-    background: hsl(var(--background));
+    background: hsl(var(--bubble-in));
     color: var(--chat-fg, hsl(var(--foreground)));
   }
 
   .hero-title {
-    font-size: 30px;
-    line-height: 1.08;
+    font-size: 1.5em;
+    line-height: 1.15;
     font-weight: 600;
-    letter-spacing: -0.035em;
+    letter-spacing: -0.01em;
   }
-  @media (min-width: 1024px) {
-    .hero-title {
-      font-size: 40px;
-    }
+  .bubble {
+    box-shadow: 0 1px 0.5px hsl(0 0% 0% / 0.13);
   }
-  @media (min-width: 1440px) {
-    .hero-title {
-      font-size: 50px;
-    }
+  .chat-wall {
+    background-color: hsl(var(--chat-bg));
+    background-image: radial-gradient(hsl(var(--foreground) / 0.045) 1px, transparent 1.2px);
+    background-size: 22px 22px;
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
   }
 
   .scroll-thin {
