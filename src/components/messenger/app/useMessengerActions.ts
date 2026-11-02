@@ -175,6 +175,15 @@ export function useMessengerActions({
   const send = async (text: string) => {
     const chat = chats.find((c) => c.id === activeRef.current);
     if (!chat) return;
+    return sendToChat(chat, text);
+  };
+
+  const forward = async (text: string, chatIds: number[]) => {
+    const targets = chats.filter((c) => chatIds.includes(c.id));
+    for (const c of targets) await sendToChat(c, text);
+  };
+
+  const sendToChat = async (chat: ChatItem, text: string) => {
     if (chat.group) return sendGroup(chat, text, false);
     const peerKey = chat.peer.publicKey;
     setSendError("");
@@ -410,6 +419,7 @@ export function useMessengerActions({
     calls.filter((c) => c.direction === "missed").length + groupCalls.filter((c) => c.direction === "missed").length;
 
   return {
+    forward,
     deleteForMe,
     deleteForAll,
     sendGroup,

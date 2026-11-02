@@ -9,6 +9,7 @@ export type FileMeta = {
   w?: number;
   h?: number;
   caption?: string;
+  fwd?: boolean;
 };
 
 export type PollPayload = { t: "poll"; id: string; q: string; options: string[]; multi: boolean };
@@ -17,7 +18,7 @@ export type EventPayload = { t: "event"; id: string; title: string; when: string
 export type RsvpAnswer = "yes" | "maybe" | "no";
 export type RsvpPayload = { t: "rsvp"; event: string; answer: RsvpAnswer };
 export type ReplyRef = { id: number; author: number; text: string };
-export type TextPayload = { t: "text"; text: string; reply?: ReplyRef };
+export type TextPayload = { t: "text"; text: string; reply?: ReplyRef; fwd?: boolean };
 
 export type DeletePayload = { t: "del"; id: number };
 
@@ -26,7 +27,7 @@ export type Payload = TextPayload | FileMeta | PollPayload | VotePayload | Event
 const PREFIX = "\u0001RA1";
 
 export function encodePayload(p: Payload) {
-  if (p.t === "text" && !p.reply) return p.text;
+  if (p.t === "text" && !p.reply && !p.fwd) return p.text;
   return PREFIX + JSON.stringify(p);
 }
 
@@ -88,4 +89,11 @@ export function deletedIds(list: { id: number; text: string; mine: boolean; from
     if (author.get(p.id) === by) out.add(p.id);
   }
   return out;
+}
+
+export function forwardText(text: string): string | null {
+  const p = parsePayload(text);
+  if (p.t === "text") return encodePayload({ t: "text", text: p.text, fwd: true });
+  if (p.t === "file") return encodePayload({ ...p, fwd: true });
+  return null;
 }

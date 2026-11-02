@@ -60,6 +60,7 @@ export default function MessengerLayout(props: Props) {
     sendPayload,
     deleteForMe,
     deleteForAll,
+    forward,
     uploading,
     sendFile,
     groupCreate,
@@ -123,6 +124,8 @@ export default function MessengerLayout(props: Props) {
                 : startCall(active.peer, k)
             }
             onDeleteForMe={deleteForMe}
+            chats={chats}
+            onForward={forward}
             onDeleteForAll={deleteForAll}
             onBack={() => setMobileOpen(false)}
           />

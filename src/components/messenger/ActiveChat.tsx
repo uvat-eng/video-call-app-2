@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
-import { dayLabel, hhmm, presence, type CallKind, type GroupInfo, type Message, type User } from "@/lib/messenger-data";
+import { dayLabel, hhmm, presence, type ChatItem, type CallKind, type GroupInfo, type Message, type User } from "@/lib/messenger-data";
 import { safetyCode } from "@/lib/e2e";
 import { MAX_FILE } from "@/lib/files";
 import {
+  forwardText,
   parsePayload,
   previewText,
   type ReplyRef,
@@ -20,6 +21,7 @@ import ComposeSheet from "./ComposeSheet";
 import GroupInfoPanel from "./GroupInfoPanel";
 import UserAvatar from "./UserAvatar";
 import SwipeReply from "./SwipeReply";
+import ForwardSheet from "./ForwardSheet";
 
 type Props = {
   peer: User;
@@ -38,6 +40,8 @@ type Props = {
   onLoadContacts: () => void;
   onCall: (kind: CallKind) => void;
   onDeleteForMe: (ids: number[]) => void;
+  chats: ChatItem[];
+  onForward: (text: string, chatIds: number[]) => Promise<void>;
   onDeleteForAll: (id: number) => Promise<void>;
   onBack?: () => void;
   className?: string;
@@ -64,6 +68,8 @@ export default function ActiveChat({
   onCall,
   onDeleteForMe,
   onDeleteForAll,
+  chats,
+  onForward,
   onBack,
   className,
   wallpaper,
@@ -78,7 +84,8 @@ export default function ActiveChat({
   const [reply, setReply] = useState<ReplyRef | null>(null);
   const [flash, setFlash] = useState<number | null>(null);
   const [picked, setPicked] = useState<Parsed | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [fwd, setFwd] = useState<Parsed | null>(null);
   const pressTimer = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
@@ -195,8 +202,12 @@ export default function ActiveChat({
       document.execCommand("copy");
       ta.remove();
     }
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    toast("Скопировано");
+  };
+
+  const toast = (t: string) => {
+    setCopied(t);
+    window.setTimeout(() => setCopied((c) => (c === t ? null : c)), 1600);
   };
 
   const canDeleteAll = (x: Parsed) =>
@@ -356,6 +367,12 @@ export default function ActiveChat({
                       m.mine ? "bubble-mine" : "bubble-peer",
                     )}
                   />
+                )}
+                {!x.deleted && (p.t === "text" || p.t === "file") && p.fwd && (
+                  <span className={cn("flex items-center gap-1 text-[.78em] italic opacity-60", p.t === "file" && "px-1 pb-1")}>
+                    <Icon name="Forward" size={13} />
+                    Пересланное сообщение
+                  </span>
                 )}
                 {x.deleted && (
                   <span className="flex items-center gap-1.5 pr-14 italic opacity-60">
@@ -540,6 +557,7 @@ export default function ActiveChat({
             {(
               [
                 ["Ответить", "Reply", true, () => startReply(picked.msg, picked.author)],
+                ["Переслать", "Forward", !!forwardText(picked.msg.text), () => setFwd(picked)],
                 ["Копировать", "Copy", picked.p.t === "text" || picked.p.t === "poll" || picked.p.t === "event", () => copyText(picked)],
                 ["Удалить у меня", "Trash", true, () => onDeleteForMe([picked.msg.id])],
                 ["Удалить у всех", "Trash2", canDeleteAll(picked), () => onDeleteForAll(picked.msg.id)],
@@ -570,8 +588,21 @@ export default function ActiveChat({
       )}
       {copied && (
         <div className="pointer-events-none absolute bottom-24 left-1/2 z-40 -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-[.85em] text-background shadow-lg">
-          Скопировано
+          {copied}
         </div>
+      )}
+      {fwd && (
+        <ForwardSheet
+          chats={chats}
+          preview={previewText(fwd.msg.text)}
+          onCancel={() => setFwd(null)}
+          onSend={async (ids) => {
+            const t = forwardText(fwd.msg.text);
+            if (t) await onForward(t, ids);
+            setFwd(null);
+            toast(ids.length > 1 ? `Переслано в ${ids.length} ${ids.length < 5 ? "чата" : "чатов"}` : "Переслано");
+          }}
+        />
       )}
       {compose && (
         <ComposeSheet
