@@ -29,14 +29,13 @@ jobs:
       - name: Сборка архива
         working-directory: ios
         run: |
-          xcodebuild archive -project RuChat.xcodeproj -scheme RuChat -configuration Release -destination generic/platform=iOS -archivePath $RUNNER_TEMP/RuChat.xcarchive DEVELOPMENT_TEAM=$TEAM CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION=${{ github.run_number }}
-
-      - name: Загрузка в App Store Connect
+          xcodebuild archive -project RuChat.xcodeproj -scheme RuChat -configuration Release -destination generic/platform=iOS -archivePath $RUNNER_TEMP/RuChat.xcarchive DEVELOPMENT_TEAM=$TEAM CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIR Connect
         run: |
-          AUTH="-allowProvisioningUC_KEY_ID.p8 -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"
+          test -n "$ASC_KEY_ID" || { echo "Пустой секрет ASC_KEY_ID"; exit 1; }
+          test -n "$_ID" || { echo "Пустой секрет ASC_ISSUER_ID"; exit 1; }
           P=$RUNNER_TEMP/export.plist
-          /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" $P
-          /usr/libexec/PlistBuddy -c "Add :destination string upload" $P
-          /usr/libexec/PlistBuddy -c "Add :teamID string $TEAM" $P
-          /usr/libexec/PlistBuddy -c "Add :signingStyle string automatic" $P
-          xcodebuild -exportArchive -archivePath $RUNNER_TEMP/RuChat.xcarchive -exportOptionsPlist $P -exportPath $RUNNER_TEMP/out $AUTH
+          /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" "$P"
+          /usr/libexec/PlistBuddy -c "Add :destination string upload" "$P"
+          /listBuddy -c "Add :teamID string $TEAM" "$P"
+          /usr/libexec/PlistBuddy -c "Add :signingStyle string automatic" "$P"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/RuChat.xcarchive" -exportOptionsPlist "$P" -exportPath "$RUNNER_TEMP/out" -allowProvisioningUpdates -authenticationKeyprivate_keys/AuthKey_$ASC_KEY_ID.p8" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
