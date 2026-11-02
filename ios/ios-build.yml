@@ -33,10 +33,11 @@ jobs:
 
       - name: Загрузка в App Store Connect
         run: |
-          AUTH="-allowProvisioningUpdates -authenticationKeyPath $HOME/private_keys/AuthKey_$ASC_KEY_ID.p8 -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"
+          test -n "$ASC_KEY_ID" || { echo "Пустой секрет ASC_KEY_ID"; exit 1; }
+          test -n "$ASC_ISSUER_ID" || { echo "Пустой секрет ASC_ISSUER_ID"; exit 1; }
           P=$RUNNER_TEMP/export.plist
-          /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" $P
-          /usr/libexec/PlistBuddy -c "Add :destination string upload" $P
-          /usr/libexec/PlistBuddy -c "Add :teamID string $TEAM" $P
-          /usr/libexec/PlistBuddy -c "Add :signingStyle string automatic" $P
-          xcodebuild -exportArchive -archivePath $RUNNER_TEMP/RuChat.xcarchive -exportOptionsPlist $P -exportPath $RUNNER_TEMP/out $AUTH
+          /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" "$P"
+          /usr/libexec/PlistBuddy -c "Add :destination string upload" "$P"
+          /usr/libexec/PlistBuddy -c "Add :teamID string $TEAM" "$P"
+          /usr/libexec/PlistBuddy -c "Add :signingStyle string automatic" "$P"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/RuChat.xcarchive" -exportOptionsPlist "$P" -exportPath "$RUNNER_TEMP/out" -allowProvisioningUpdates -authenticationKeyPath "$HOME/private_keys/AuthKey_$ASC_KEY_ID.p8" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
