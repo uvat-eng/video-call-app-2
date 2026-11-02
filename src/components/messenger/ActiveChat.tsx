@@ -6,6 +6,8 @@ import { safetyCode } from "@/lib/e2e";
 import { MAX_FILE } from "@/lib/files";
 import {
   parsePayload,
+  previewText,
+  type ReplyRef,
   type EventPayload,
   type Payload,
   type PollPayload,
@@ -17,6 +19,7 @@ import EventCard from "./EventCard";
 import ComposeSheet from "./ComposeSheet";
 import GroupInfoPanel from "./GroupInfoPanel";
 import UserAvatar from "./UserAvatar";
+import SwipeReply from "./SwipeReply";
 
 type Props = {
   peer: User;
@@ -68,6 +71,9 @@ export default function ActiveChat({
   const [compose, setCompose] = useState<"poll" | "event" | null>(null);
   const [info, setInfo] = useState(false);
   const [localErr, setLocalErr] = useState("");
+  const [reply, setReply] = useState<ReplyRef | null>(null);
+  const [flash, setFlash] = useState<number | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -114,8 +120,10 @@ export default function ActiveChat({
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
-    onSend(t);
+    if (reply) onSendPayload({ t: "text", text: t, reply });
+    else onSend(t);
     setText("");
+    setReply(null);
   };
 
   const pick = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -131,6 +139,24 @@ export default function ActiveChat({
       onSendFile(f, "");
     }
   };
+
+  const startReply = (m: Message, author: number) => {
+    if (m.id < 0) return;
+    const t = previewText(m.text).slice(0, 160) || "Сообщение";
+    setReply({ id: m.id, author, text: t });
+    setMenu(false);
+    inputRef.current?.focus();
+  };
+
+  const jumpTo = (id: number) => {
+    const el = scrollRef.current?.querySelector(`[data-mid="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlash(id);
+    window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1200);
+  };
+
+  const authorName = (id: number) => (id === me.id ? "Вы" : (names[id] ?? "Участник"));
 
   const others = group ? group.members.filter((m) => m.id !== me.id) : [];
   const onlineCount = others.filter((m) => m.online).length;
@@ -183,7 +209,7 @@ export default function ActiveChat({
 
       <div
         ref={scrollRef}
-        className="chat-wall scroll-thin flex min-h-0 flex-1 flex-col gap-[3px] overflow-y-auto px-3 py-3 sm:px-[6%]"
+        className="chat-wall scroll-thin flex min-h-0 flex-1 flex-col gap-[3px] overflow-y-auto overflow-x-hidden px-3 py-3 sm:px-[6%]"
         style={wallpaper ? { background: wallpaper } : undefined}
       >
         <button
@@ -233,7 +259,15 @@ export default function ActiveChat({
                 {day}
               </div>
             )}
-            <div className={cn("flex max-w-[85%] gap-1.5 md:max-w-[70%]", m.mine ? "self-end" : "self-start", first && "mt-1.5")}>
+            <SwipeReply onReply={() => startReply(m, author)} className={cn(first && "mt-1.5")}>
+            <div
+              data-mid={m.id}
+              className={cn(
+                "flex max-w-[85%] gap-1.5 rounded-lg transition-colors duration-500 md:max-w-[70%]",
+                m.mine ? "ml-auto" : "mr-auto",
+                flash === m.id && "bg-primary/20",
+              )}
+            >
               {group && !m.mine && (
                 <span className="w-8 shrink-0 self-end">
                   {visible[i + 1]?.author !== author && (
@@ -264,6 +298,19 @@ export default function ActiveChat({
                       m.mine ? "bubble-mine" : "bubble-peer",
                     )}
                   />
+                )}
+                {p.t === "text" && p.reply && (
+                  <button
+                    type="button"
+                    onClick={() => jumpTo(p.reply!.id)}
+                    className="mb-1 flex w-full min-w-[140px] overflow-hidden rounded-md bg-foreground/[.06] text-left"
+                  >
+                    <span className="w-1 shrink-0 bg-primary" />
+                    <span className="min-w-0 px-2 py-1">
+                      <span className="block truncate text-[.8em] font-medium text-primary">{authorName(p.reply.author)}</span>
+                      <span className="line-clamp-2 whitespace-normal text-[.85em] opacity-70">{p.reply.text}</span>
+                    </span>
+                  </button>
                 )}
                 {p.t === "text" && (
                   <>
@@ -307,6 +354,7 @@ export default function ActiveChat({
                 </small>
               </div>
             </div>
+            </SwipeReply>
             </Fragment>
           );
         })}
@@ -356,7 +404,25 @@ export default function ActiveChat({
         <input ref={photoRef} type="file" accept="image/*,video/*" multiple hidden onChange={pick} />
         <input ref={fileRef} type="file" multiple hidden onChange={pick} />
         <div className="flex items-end gap-1.5 px-1.5 py-1.5">
-          <div className="bubble flex min-h-[46px] min-w-0 flex-1 items-center gap-1 rounded-[24px] bg-card pl-1.5 pr-1">
+          <div className="bubble min-w-0 flex-1 overflow-hidden rounded-[24px] bg-card">
+          {reply && (
+            <div className="mx-1.5 mt-1.5 flex overflow-hidden rounded-[14px] bg-secondary">
+              <span className="w-1 shrink-0 bg-primary" />
+              <div className="min-w-0 flex-1 px-2.5 py-1.5">
+                <div className="truncate text-[.82em] font-medium text-primary">{authorName(reply.author)}</div>
+                <div className="truncate text-[.85em] text-muted-foreground">{reply.text}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReply(null)}
+                aria-label="Отменить ответ"
+                className="grid w-9 shrink-0 place-items-center text-muted-foreground"
+              >
+                <Icon name="X" size={18} />
+              </button>
+            </div>
+          )}
+          <div className="flex min-h-[46px] items-center gap-1 pl-1.5 pr-1">
             <button
               type="button"
               onClick={() => setMenu((v) => !v)}
@@ -369,6 +435,7 @@ export default function ActiveChat({
               <Icon name="Plus" size={24} />
             </button>
             <input
+              ref={inputRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onFocus={() => setMenu(false)}
@@ -385,6 +452,7 @@ export default function ActiveChat({
                 <Icon name="Camera" size={22} />
               </button>
             )}
+          </div>
           </div>
           <button
             type="submit"

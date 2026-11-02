@@ -16,14 +16,15 @@ export type VotePayload = { t: "vote"; poll: string; choice: number[] };
 export type EventPayload = { t: "event"; id: string; title: string; when: string; place: string; note: string };
 export type RsvpAnswer = "yes" | "maybe" | "no";
 export type RsvpPayload = { t: "rsvp"; event: string; answer: RsvpAnswer };
-export type TextPayload = { t: "text"; text: string };
+export type ReplyRef = { id: number; author: number; text: string };
+export type TextPayload = { t: "text"; text: string; reply?: ReplyRef };
 
 export type Payload = TextPayload | FileMeta | PollPayload | VotePayload | EventPayload | RsvpPayload;
 
 const PREFIX = "\u0001RA1";
 
 export function encodePayload(p: Payload) {
-  if (p.t === "text") return p.text;
+  if (p.t === "text" && !p.reply) return p.text;
   return PREFIX + JSON.stringify(p);
 }
 
