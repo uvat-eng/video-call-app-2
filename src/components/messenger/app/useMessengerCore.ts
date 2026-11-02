@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type CallKind, type CallRecord, type ChatItem, type IncomingCall, type IncomingGroup, type GroupCallRecord, type InboxItem, type GroupInfo, type Message, type User, groupPeer } from "@/lib/messenger-data";
-import { isSilentText, previewText } from "@/lib/payload";
+import { deletedIds, isSilentText, previewText } from "@/lib/payload";
 import { setMediaVault } from "@/lib/files";
 import { groupDecrypt, type E2E } from "@/lib/e2e";
 import { downloadHistory, uploadHistory } from "@/lib/history-sync";
@@ -264,6 +264,15 @@ export function useMessengerCore({
         list.sort((a, b) => a.id - b.id);
         next[chatId] = list.slice(-HISTORY_LIMIT);
       }
+      return persist(next);
+    },
+    [persist],
+  );
+
+  const removeMessages = useCallback(
+    (chatId: number, ids: number[]) => {
+      const next: History = { ...historyRef.current };
+      next[chatId] = (next[chatId] ?? []).filter((m) => !ids.includes(m.id));
       return persist(next);
     },
     [persist],
@@ -601,11 +610,13 @@ export function useMessengerCore({
   const chats = useMemo<ChatItem[]>(() => {
     return serverChats
       .map((c) => {
-        const list = [...(history[c.id] ?? []), ...(outbox[c.id] ?? [])].filter((m) => !isSilentText(m.text));
+        const all = [...(history[c.id] ?? []), ...(outbox[c.id] ?? [])];
+        const gone = deletedIds(all, me.id, c.peer.id);
+        const list = all.filter((m) => !isSilentText(m.text));
         const last = list[list.length - 1];
         const author =
           c.group && last && !last.mine ? c.group.members.find((m) => m.id === last.from)?.name.split(" ")[0] : "";
-        const text = last ? previewText(last.text) : "";
+        const text = last ? (gone.has(last.id) ? "Сообщение удалено" : previewText(last.text)) : "";
         return {
           ...c,
           lastText: author ? `${author}: ${text}` : text,
@@ -614,7 +625,7 @@ export function useMessengerCore({
         };
       })
       .sort((a, b) => (b.lastAt ?? "").localeCompare(a.lastAt ?? ""));
-  }, [serverChats, history, outbox]);
+  }, [serverChats, history, outbox, me.id]);
 
   const openChat = (id: number) => {
     if (id !== activeRef.current) {
@@ -744,6 +755,7 @@ export function useMessengerCore({
     syncBook,
     persist,
     appendMessages,
+    removeMessages,
     flushOutbox,
     handleAuthError,
     groupKeyOf,

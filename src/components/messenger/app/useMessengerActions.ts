@@ -48,6 +48,7 @@ export function useMessengerActions({
     saveOutbox,
     persist,
     appendMessages,
+    removeMessages,
     handleAuthError,
     groupKeyOf,
     poll,
@@ -208,6 +209,21 @@ export function useMessengerActions({
     const list = (history[active.id] ?? []).map((m) => (m.mine ? { ...m, read: m.id <= active.readUpto } : m));
     return [...list, ...(outbox[active.id] ?? []), ...(pending[active.id] ?? [])];
   }, [active, history, pending, outbox]);
+
+  const deleteForMe = (ids: number[]) => {
+    if (!active) return;
+    const local = ids.filter((id) => id < 0);
+    if (local.length) {
+      const next = { ...outboxRef.current, [active.id]: (outboxRef.current[active.id] ?? []).filter((m) => !local.includes(m.id)) };
+      saveOutbox(next);
+    }
+    removeMessages(active.id, ids);
+  };
+
+  const deleteForAll = async (id: number) => {
+    if (!active) return;
+    await sendPayload({ t: "del", id });
+  };
 
   const openChatWith = async (user: User) => {
     const existing = chats.find((c) => c.peer.id === user.id);
@@ -394,6 +410,8 @@ export function useMessengerActions({
     calls.filter((c) => c.direction === "missed").length + groupCalls.filter((c) => c.direction === "missed").length;
 
   return {
+    deleteForMe,
+    deleteForAll,
     sendGroup,
     sendPayload,
     uploading,

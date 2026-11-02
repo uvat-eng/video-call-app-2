@@ -19,7 +19,9 @@ export type RsvpPayload = { t: "rsvp"; event: string; answer: RsvpAnswer };
 export type ReplyRef = { id: number; author: number; text: string };
 export type TextPayload = { t: "text"; text: string; reply?: ReplyRef };
 
-export type Payload = TextPayload | FileMeta | PollPayload | VotePayload | EventPayload | RsvpPayload;
+export type DeletePayload = { t: "del"; id: number };
+
+export type Payload = TextPayload | FileMeta | PollPayload | VotePayload | EventPayload | RsvpPayload | DeletePayload;
 
 const PREFIX = "\u0001RA1";
 
@@ -38,7 +40,7 @@ export function parsePayload(text: string): Payload {
 }
 
 export function isSilent(p: Payload) {
-  return p.t === "vote" || p.t === "rsvp";
+  return p.t === "vote" || p.t === "rsvp" || p.t === "del";
 }
 
 export function isSilentText(text: string) {
@@ -72,4 +74,18 @@ export function fileSize(n: number) {
   if (n < 1024) return `${n} Б`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} КБ`;
   return `${(n / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+export function deletedIds(list: { id: number; text: string; mine: boolean; from?: number }[], me: number, peer: number) {
+  const author = new Map<number, number>();
+  for (const m of list) author.set(m.id, m.mine ? me : (m.from ?? peer));
+  const out = new Set<number>();
+  for (const m of list) {
+    if (!m.text.startsWith(PREFIX)) continue;
+    const p = parsePayload(m.text);
+    if (p.t !== "del") continue;
+    const by = m.mine ? me : (m.from ?? peer);
+    if (author.get(p.id) === by) out.add(p.id);
+  }
+  return out;
 }

@@ -58,6 +58,8 @@ export default function MessengerLayout(props: Props) {
     loadContacts,
     active,
     sendPayload,
+    deleteForMe,
+    deleteForAll,
     uploading,
     sendFile,
     groupCreate,
@@ -120,6 +122,8 @@ export default function MessengerLayout(props: Props) {
                   )
                 : startCall(active.peer, k)
             }
+            onDeleteForMe={deleteForMe}
+            onDeleteForAll={deleteForAll}
             onBack={() => setMobileOpen(false)}
           />
         ) : (

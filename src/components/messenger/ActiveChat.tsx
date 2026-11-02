@@ -37,12 +37,14 @@ type Props = {
   onGroupAction: (action: string, body: Record<string, unknown>) => Promise<string | null>;
   onLoadContacts: () => void;
   onCall: (kind: CallKind) => void;
+  onDeleteForMe: (ids: number[]) => void;
+  onDeleteForAll: (id: number) => Promise<void>;
   onBack?: () => void;
   className?: string;
   wallpaper?: string;
 };
 
-type Parsed = { msg: Message; p: Payload; author: number };
+type Parsed = { msg: Message; p: Payload; author: number; deleted?: boolean };
 
 export default function ActiveChat({
   peer,
@@ -60,6 +62,8 @@ export default function ActiveChat({
   onGroupAction,
   onLoadContacts,
   onCall,
+  onDeleteForMe,
+  onDeleteForAll,
   onBack,
   className,
   wallpaper,
@@ -73,6 +77,9 @@ export default function ActiveChat({
   const [localErr, setLocalErr] = useState("");
   const [reply, setReply] = useState<ReplyRef | null>(null);
   const [flash, setFlash] = useState<number | null>(null);
+  const [picked, setPicked] = useState<Parsed | null>(null);
+  const [copied, setCopied] = useState(false);
+  const pressTimer = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -102,11 +109,17 @@ export default function ActiveChat({
     }));
     const votes: Record<string, Record<number, number[]>> = {};
     const rsvps: Record<string, Record<number, RsvpAnswer>> = {};
+    const authorOf = new Map(parsed.map((x) => [x.msg.id, x.author]));
+    const gone = new Set<number>();
     for (const x of parsed) {
       if (x.p.t === "vote") (votes[x.p.poll] ??= {})[x.author] = x.p.choice;
       if (x.p.t === "rsvp") (rsvps[x.p.event] ??= {})[x.author] = x.p.answer;
+      if (x.p.t === "del" && authorOf.get(x.p.id) === x.author) gone.add(x.p.id);
     }
-    return { visible: parsed.filter((x) => x.p.t !== "vote" && x.p.t !== "rsvp"), votes, rsvps };
+    const visible = parsed
+      .filter((x) => x.p.t !== "vote" && x.p.t !== "rsvp" && x.p.t !== "del")
+      .map((x) => (gone.has(x.msg.id) ? { ...x, p: { t: "gone" } as unknown as Payload, deleted: true } : x));
+    return { visible, votes, rsvps };
   }, [messages, me.id, peer.id]);
 
   const lastId = visible[visible.length - 1]?.msg.id;
@@ -156,13 +169,46 @@ export default function ActiveChat({
     window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1200);
   };
 
+  const pressStart = (x: Parsed) => {
+    if (x.deleted) return;
+    if (pressTimer.current) window.clearTimeout(pressTimer.current);
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null;
+      navigator.vibrate?.(20);
+      setPicked(x);
+    }, 450);
+  };
+  const pressCancel = () => {
+    if (pressTimer.current) window.clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  };
+
+  const copyText = async (x: Parsed) => {
+    const t = x.p.t === "text" ? x.p.text : previewText(x.msg.text);
+    try {
+      await navigator.clipboard.writeText(t);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = t;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  const canDeleteAll = (x: Parsed) =>
+    x.msg.mine && x.msg.id > 0 && Date.now() - new Date(x.msg.at).getTime() < 48 * 3600 * 1000;
+
   const authorName = (id: number) => (id === me.id ? "Вы" : (names[id] ?? "Участник"));
 
   const others = group ? group.members.filter((m) => m.id !== me.id) : [];
   const onlineCount = others.filter((m) => m.online).length;
 
   return (
-    <section className={cn("flex h-full min-h-0 flex-col", className)}>
+    <section className={cn("relative flex h-full min-h-0 flex-col", className)}>
       <header className="pt-safe shrink-0 border-b border-border bg-card">
         <div className="flex h-[60px] items-center gap-1 pl-1 pr-2">
           {onBack && (
@@ -245,7 +291,8 @@ export default function ActiveChat({
         {!loading && visible.length === 0 && (
           <p className="bubble mx-auto rounded-lg bg-card px-3 py-1.5 text-center text-[.8em] text-muted-foreground">Напишите первое сообщение</p>
         )}
-        {visible.map(({ msg: m, p, author }, i) => {
+        {visible.map((x, i) => {
+          const { msg: m, p, author } = x;
           const prev = visible[i - 1];
           const showAuthor = !!group && !m.mine && prev?.author !== author;
           const wide = p.t === "poll" || p.t === "event" || p.t === "file";
@@ -259,13 +306,24 @@ export default function ActiveChat({
                 {day}
               </div>
             )}
-            <SwipeReply onReply={() => startReply(m, author)} className={cn(first && "mt-1.5")}>
+            <SwipeReply onReply={() => !x.deleted && startReply(m, author)} className={cn(first && "mt-1.5")}>
             <div
               data-mid={m.id}
+              onTouchStart={() => pressStart(x)}
+              onTouchMove={pressCancel}
+              onTouchEnd={pressCancel}
+              onTouchCancel={pressCancel}
+              onContextMenu={(e) => {
+                if (x.deleted) return;
+                e.preventDefault();
+                pressCancel();
+                setPicked(x);
+              }}
               className={cn(
                 "flex max-w-[85%] gap-1.5 rounded-lg transition-colors duration-500 md:max-w-[70%]",
                 m.mine ? "ml-auto" : "mr-auto",
-                flash === m.id && "bg-primary/20",
+                (flash === m.id || picked?.msg.id === m.id) && "bg-primary/20",
+                "select-none [-webkit-touch-callout:none]",
               )}
             >
               {group && !m.mine && (
@@ -298,6 +356,12 @@ export default function ActiveChat({
                       m.mine ? "bubble-mine" : "bubble-peer",
                     )}
                   />
+                )}
+                {x.deleted && (
+                  <span className="flex items-center gap-1.5 pr-14 italic opacity-60">
+                    <Icon name="Ban" size={15} />
+                    {m.mine ? "Вы удалили это сообщение" : "Сообщение удалено"}
+                  </span>
                 )}
                 {p.t === "text" && p.reply && (
                   <button
@@ -340,7 +404,7 @@ export default function ActiveChat({
                 <small
                   className={cn(
                     "flex items-center justify-end gap-0.5 text-[.68em] leading-none",
-                    p.t === "text" ? "float-right -mb-0.5 -mt-3 ml-2 translate-y-1" : "mt-1 pr-1",
+                    p.t === "text" || x.deleted ? "float-right -mb-0.5 -mt-3 ml-2 translate-y-1" : "mt-1 pr-1",
                   )}
                 >
                   <span className="opacity-60">{hhmm(m.at)}</span>
@@ -465,6 +529,50 @@ export default function ActiveChat({
         </div>
       </form>
 
+      {picked && (
+        <div className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40" onClick={() => setPicked(null)}>
+          <div
+            className="pb-safe rounded-t-2xl bg-card pt-2 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-border" />
+            <p className="mx-5 mb-1 line-clamp-2 text-[.85em] text-muted-foreground">{previewText(picked.msg.text)}</p>
+            {(
+              [
+                ["Ответить", "Reply", true, () => startReply(picked.msg, picked.author)],
+                ["Копировать", "Copy", picked.p.t === "text" || picked.p.t === "poll" || picked.p.t === "event", () => copyText(picked)],
+                ["Удалить у меня", "Trash", true, () => onDeleteForMe([picked.msg.id])],
+                ["Удалить у всех", "Trash2", canDeleteAll(picked), () => onDeleteForAll(picked.msg.id)],
+              ] as [string, string, boolean, () => void][]
+            )
+              .filter((a) => a[2])
+              .map(([label, icon, , fn]) => (
+                <button
+                  key={label}
+                  onClick={() => {
+                    setPicked(null);
+                    fn();
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-4 px-5 py-3.5 text-left active:bg-secondary",
+                    label.startsWith("Удалить") && "text-destructive",
+                  )}
+                >
+                  <Icon name={icon} size={21} className={label.startsWith("Удалить") ? "" : "text-muted-foreground"} />
+                  {label}
+                </button>
+              ))}
+            <button onClick={() => setPicked(null)} className="mb-1 w-full px-5 py-3.5 text-center font-medium text-primary">
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
+      {copied && (
+        <div className="pointer-events-none absolute bottom-24 left-1/2 z-40 -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-[.85em] text-background shadow-lg">
+          Скопировано
+        </div>
+      )}
       {compose && (
         <ComposeSheet
           kind={compose}
