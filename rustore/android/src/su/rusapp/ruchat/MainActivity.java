@@ -51,7 +51,7 @@ public class MainActivity extends Activity {
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#0A0603"));
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.parseColor("#EEF1EC"));
+        root.setBackgroundColor(Color.parseColor("#FFFFFF"));
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
         applySafeArea(root);
