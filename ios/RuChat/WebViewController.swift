@@ -24,7 +24,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 10 / 255, green: 6 / 255, blue: 3 / 255, alpha: 1)
+        view.backgroundColor = .systemBackground
 
         let controller = WKUserContentController()
         controller.addUserScript(WKUserScript(source: Self.bridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -40,7 +40,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.websiteDataStore = .default()
-        config.applicationNameForUserAgent = "RuChatIOS/1.0"
+        config.applicationNameForUserAgent = "RuChatIOS/1.2"
 
         webView = WKWebView(frame: view.bounds, configuration: config)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]

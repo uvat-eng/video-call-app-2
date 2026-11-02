@@ -6,8 +6,7 @@ struct RuChatApp: App {
         WindowGroup {
             WebScreen()
                 .ignoresSafeArea(.container, edges: .bottom)
-                .background(Color(red: 10 / 255, green: 6 / 255, blue: 3 / 255).ignoresSafeArea())
-                .preferredColorScheme(.dark)
+                .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         }
     }
 }
