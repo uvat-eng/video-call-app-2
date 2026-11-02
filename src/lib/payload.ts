@@ -10,6 +10,9 @@ export type FileMeta = {
   h?: number;
   caption?: string;
   fwd?: boolean;
+  kind?: "voice" | "circle";
+  dur?: number;
+  wave?: number[];
 };
 
 export type PollPayload = { t: "poll"; id: string; q: string; options: string[]; multi: boolean };
@@ -54,6 +57,8 @@ export function previewText(text: string) {
     case "text":
       return p.text;
     case "file":
+      if (p.kind === "voice") return "Голосовое сообщение";
+      if (p.kind === "circle") return "Видеосообщение";
       if (p.mime.startsWith("image/")) return p.caption ? `Фото: ${p.caption}` : "Фото";
       if (p.mime.startsWith("video/")) return "Видео";
       return `Файл: ${p.name}`;

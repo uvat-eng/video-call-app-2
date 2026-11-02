@@ -13,7 +13,9 @@ import {
   type Payload,
   type PollPayload,
   type RsvpAnswer,
+  type FileMeta,
 } from "@/lib/payload";
+import MediaRecorderBar from "./chat/MediaRecorderBar";
 import FileBubble from "./FileBubble";
 import PollCard from "./PollCard";
 import EventCard from "./EventCard";
@@ -35,7 +37,7 @@ type Props = {
   uploading: number | null;
   onSend: (text: string) => void;
   onSendPayload: (p: Payload) => void;
-  onSendFile: (file: File, caption: string) => void;
+  onSendFile: (file: File, caption: string, extra?: Partial<FileMeta>) => void;
   onGroupAction: (action: string, body: Record<string, unknown>) => Promise<string | null>;
   onLoadContacts: () => void;
   onCall: (kind: CallKind) => void;
@@ -306,6 +308,7 @@ export default function ActiveChat({
           const { msg: m, p, author } = x;
           const prev = visible[i - 1];
           const showAuthor = !!group && !m.mine && prev?.author !== author;
+          const circle = p.t === "file" && p.kind === "circle";
           const wide = p.t === "poll" || p.t === "event" || p.t === "file";
           const first = prev?.author !== author || prev?.msg.mine !== m.mine;
           const day = dayLabel(m.at);
@@ -350,8 +353,8 @@ export default function ActiveChat({
               <div
                 className={cn(
                   "bubble relative min-w-0 animate-msg-in whitespace-pre-wrap break-words rounded-lg leading-[1.35]",
-                  wide ? "p-1.5" : "pb-1.5 pl-2.5 pr-2 pt-1.5",
-                  m.mine ? "bubble-mine" : "bubble-peer",
+                  circle ? "p-0" : wide ? "p-1.5" : "pb-1.5 pl-2.5 pr-2 pt-1.5",
+                  circle ? "!bg-transparent !shadow-none" : m.mine ? "bubble-mine" : "bubble-peer",
                   first && (m.mine ? "rounded-tr-none" : "rounded-tl-none"),
                   m.id < 0 && "opacity-70",
                 )}
@@ -359,7 +362,7 @@ export default function ActiveChat({
                 {showAuthor && (
                   <div className="mb-0.5 text-[.8em] font-medium text-primary">{names[author] ?? "Участник"}</div>
                 )}
-                {first && (
+                {first && !circle && (
                   <span
                     className={cn(
                       "absolute top-0 h-3 w-2",
@@ -399,7 +402,7 @@ export default function ActiveChat({
                     <span className="inline-block w-[4.2em]" />
                   </>
                 )}
-                {p.t === "file" && <FileBubble meta={p} />}
+                {p.t === "file" && <FileBubble meta={p} mine={m.mine} />}
                 {p.t === "poll" && (
                   <PollCard
                     poll={p as PollPayload}
@@ -422,6 +425,7 @@ export default function ActiveChat({
                   className={cn(
                     "flex items-center justify-end gap-0.5 text-[.68em] leading-none",
                     p.t === "text" || x.deleted ? "float-right -mb-0.5 -mt-3 ml-2 translate-y-1" : "mt-1 pr-1",
+                    circle && "ml-auto w-fit rounded-full bg-black/45 px-2 py-0.5 text-white",
                   )}
                 >
                   <span className="opacity-60">{hhmm(m.at)}</span>
@@ -535,14 +539,25 @@ export default function ActiveChat({
             )}
           </div>
           </div>
-          <button
-            type="submit"
-            disabled={!text.trim()}
-            aria-label="Отправить"
-            className="grid h-[46px] w-[46px] shrink-0 place-items-center rounded-full bg-badge text-badge-foreground shadow transition-transform active:scale-95 disabled:opacity-100"
-          >
-            <Icon name="SendHorizontal" size={21} />
-          </button>
+          {text.trim() ? (
+            <button
+              type="submit"
+              aria-label="Отправить"
+              className="grid h-[46px] w-[46px] shrink-0 place-items-center rounded-full bg-badge text-badge-foreground shadow transition-transform active:scale-95"
+            >
+              <Icon name="SendHorizontal" size={21} />
+            </button>
+          ) : (
+            <MediaRecorderBar
+              onSend={(file, extra) => {
+                setLocalErr("");
+                onSendFile(file, "", extra);
+                setReply(null);
+              }}
+              onError={setLocalErr}
+              onActive={(a) => a && setMenu(false)}
+            />
+          )}
         </div>
       </form>
 

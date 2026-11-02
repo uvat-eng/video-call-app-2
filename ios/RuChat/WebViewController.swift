@@ -2,6 +2,7 @@ import UIKit
 import WebKit
 import Contacts
 import AVFoundation
+import UserNotifications
 
 final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private static let host = "rusapp.su"
@@ -17,7 +18,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
       window.RuChatNative = {
         platform: 'ios',
         hasContactsPermission: function () { return !!window.__ruchatContactsGranted; },
-        requestContacts: function () { window.webkit.messageHandlers.ruchat.postMessage({ type: 'contacts' }); }
+        requestContacts: function () { window.webkit.messageHandlers.ruchat.postMessage({ type: 'contacts' }); },
+        setBadge: function (n) { window.webkit.messageHandlers.ruchat.postMessage({ type: 'badge', count: n | 0 }); }
       };
     })();
     """
@@ -40,7 +42,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.websiteDataStore = .default()
-        config.applicationNameForUserAgent = "RuChatIOS/1.2"
+        config.applicationNameForUserAgent = "RuChatIOS/1.3"
 
         webView = WKWebView(frame: view.bounds, configuration: config)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -65,7 +67,12 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any], body["type"] as? String == "contacts" else { return }
+        guard let body = message.body as? [String: Any] else { return }
+        if body["type"] as? String == "badge" {
+            setBadge((body["count"] as? NSNumber)?.intValue ?? 0)
+            return
+        }
+        guard body["type"] as? String == "contacts" else { return }
         let status = CNContactStore.authorizationStatus(for: .contacts)
         if contactsGranted() {
             deliverContacts()
@@ -78,6 +85,29 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         } else {
             sendToPage(nil)
             askOpenSettings()
+        }
+    }
+
+    private var badgeAsked = false
+
+    private func setBadge(_ count: Int) {
+        let center = UNUserNotificationCenter.current()
+        let apply = {
+            if #available(iOS 16.0, *) {
+                center.setBadgeCount(max(0, count)) { _ in }
+            } else {
+                DispatchQueue.main.async { UIApplication.shared.applicationIconBadgeNumber = max(0, count) }
+            }
+        }
+        center.getNotificationSettings { [weak self] settings in
+            if settings.authorizationStatus == .notDetermined, count > 0, self?.badgeAsked == false {
+                DispatchQueue.main.async { self?.badgeAsked = true }
+                center.requestAuthorization(options: [.badge, .alert, .sound]) { granted, _ in
+                    if granted { apply() }
+                }
+            } else {
+                apply()
+            }
         }
     }
 

@@ -99,7 +99,7 @@ export function useMessengerActions({
 
   const [uploading, setUploading] = useState<number | null>(null);
 
-  const sendFile = async (file: File, caption: string) => {
+  const sendFile = async (file: File, caption: string, extra?: Partial<FileMeta>) => {
     const chat = chats.find((c) => c.id === activeRef.current);
     if (!chat) return;
     if (!chat.group && !chat.peer.publicKey) {
@@ -119,6 +119,7 @@ export function useMessengerActions({
         meta.h = prepared.h;
       }
       if (caption) meta.caption = caption.slice(0, 1000);
+      if (extra) Object.assign(meta, extra);
       await sendPayload(meta);
     } catch (e) {
       setSendError(e instanceof Error ? e.message : "Не удалось отправить файл");

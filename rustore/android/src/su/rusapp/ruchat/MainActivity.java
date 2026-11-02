@@ -2,6 +2,10 @@ package su.rusapp.ruchat;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -40,6 +44,10 @@ public class MainActivity extends Activity {
     private static final int REQ_PERMS = 1;
     private static final int REQ_FILE = 2;
     private static final int REQ_CONTACTS = 3;
+    private static final int REQ_NOTIFY = 4;
+    private static final String BADGE_CHANNEL = "ruchat_unread";
+    private static final int BADGE_ID = 7001;
+    private int lastBadge = -1;
 
     private WebView web;
     private PermissionRequest pendingRequest;
@@ -175,12 +183,64 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void setBadge(int count) {
+            runOnUiThread(() -> applyBadge(count));
+        }
+
+        @JavascriptInterface
         public void requestContacts() {
             runOnUiThread(() -> {
                 if (granted(Manifest.permission.READ_CONTACTS)) deliverContacts();
                 else requestPermissions(new String[]{Manifest.permission.READ_CONTACTS}, REQ_CONTACTS);
             });
         }
+    }
+
+    private void applyBadge(int count) {
+        if (count == lastBadge) return;
+        lastBadge = count;
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        if (count <= 0) {
+            nm.cancel(BADGE_ID);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 33 && !granted(Manifest.permission.POST_NOTIFICATIONS)) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFY);
+            lastBadge = -1;
+            return;
+        }
+        NotificationChannel ch = nm.getNotificationChannel(BADGE_CHANNEL);
+        if (ch == null) {
+            ch = new NotificationChannel(BADGE_CHANNEL, "Непрочитанные сообщения", NotificationManager.IMPORTANCE_MIN);
+            ch.setShowBadge(true);
+            ch.setSound(null, null);
+            ch.enableVibration(false);
+            nm.createNotificationChannel(ch);
+        }
+        Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        String text = count + " " + plural(count);
+        Notification n = new Notification.Builder(this, BADGE_CHANNEL)
+                .setSmallIcon(getApplicationInfo().icon)
+                .setContentTitle("RuChat")
+                .setContentText(text)
+                .setNumber(count)
+                .setBadgeIconType(Notification.BADGE_ICON_SMALL)
+                .setOnlyAlertOnce(true)
+                .setSilent(true)
+                .setContentIntent(pi)
+                .setAutoCancel(false)
+                .build();
+        nm.notify(BADGE_ID, n);
+    }
+
+    private static String plural(int n) {
+        int a = n % 100, b = n % 10;
+        if (a >= 11 && a <= 14) return "непрочитанных сообщений";
+        if (b == 1) return "непрочитанное сообщение";
+        if (b >= 2 && b <= 4) return "непрочитанных сообщения";
+        return "непрочитанных сообщений";
     }
 
     private void deliverContacts() {
@@ -229,6 +289,7 @@ public class MainActivity extends Activity {
             else web.evaluateJavascript("window.__ruchatContacts && window.__ruchatContacts(null)", null);
             return;
         }
+        if (code == REQ_NOTIFY) return;
         if (code != REQ_PERMS || pendingRequest == null) return;
         List<String> allowed = new ArrayList<>();
         for (String r : pendingRequest.getResources()) {

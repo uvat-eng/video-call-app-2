@@ -2,8 +2,16 @@ import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { loadDecrypted, saveBlob } from "@/lib/files";
 import { fileSize, type FileMeta } from "@/lib/payload";
+import VoiceBubble from "./chat/VoiceBubble";
+import CircleBubble from "./chat/CircleBubble";
 
-export default function FileBubble({ meta }: { meta: FileMeta }) {
+export default function FileBubble({ meta }: { meta: FileMeta; mine?: boolean }) {
+  if (meta.kind === "voice") return <VoiceBubble meta={meta} />;
+  if (meta.kind === "circle") return <CircleBubble meta={meta} />;
+  return <PlainFile meta={meta} />;
+}
+
+function PlainFile({ meta }: { meta: FileMeta }) {
   const isImage = meta.mime.startsWith("image/");
   const isVideo = meta.mime.startsWith("video/");
   const [url, setUrl] = useState<string | null>(null);

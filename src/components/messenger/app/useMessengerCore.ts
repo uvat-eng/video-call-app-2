@@ -683,6 +683,15 @@ export function useMessengerCore({
   const totalUnread = chats.reduce((n, c) => n + (c.unread || 0), 0);
 
   useEffect(() => {
+    const native = (window as unknown as { RuChatNative?: { setBadge?: (n: number) => void } }).RuChatNative;
+    if (native?.setBadge) {
+      try {
+        native.setBadge(totalUnread);
+      } catch {
+        /* старая версия приложения */
+      }
+      return;
+    }
     const nav = navigator as Navigator & {
       setAppBadge?: (n?: number) => Promise<void>;
       clearAppBadge?: () => Promise<void>;
