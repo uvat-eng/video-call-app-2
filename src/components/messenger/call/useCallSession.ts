@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, API_URL, type CallKind, type User } from "@/lib/messenger-data";
 import { createPeer, getMedia, waitIce } from "@/lib/webrtc";
 import type { E2E } from "@/lib/e2e";
+import { playCallTone, stopCallTone } from "@/lib/callTones";
 
 export type ActiveCall = {
   peer: User;
@@ -300,6 +301,15 @@ export function useCallSession({ call, token, e2e, onClose }: Props) {
     const t = window.setInterval(tick, phase === "calling" || reconnecting ? 1500 : 3000);
     return () => window.clearInterval(t);
   }, [phase, reconnecting]);
+
+  useEffect(() => {
+    if (phase === "ringing") playCallTone("ringtone");
+    else if (isCaller && (phase === "connecting" || phase === "calling")) playCallTone("ringback");
+    else if (phase === "ended") playCallTone("end");
+    else stopCallTone();
+  }, [phase]);
+
+  useEffect(() => () => stopCallTone(), []);
 
   useEffect(() => {
     if (phase !== "live") return;

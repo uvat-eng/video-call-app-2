@@ -10,6 +10,7 @@ import { type ActiveGroup } from "../GroupCallScreen";
 import { matchContacts, type BookEntry, type PhoneContact } from "@/lib/phonebook";
 import { pushState, subscribePush, type PushState } from "@/lib/push";
 import { biometricAvailable, biometricEnabled, disableBiometric, enableBiometric } from "@/lib/biometric";
+import { unlockCallAudio } from "@/lib/callTones";
 
 type PollResult = {
   cursor: number;
@@ -97,6 +98,10 @@ export function useMessengerCore({
     setOutbox(outboxRef.current);
     return outboxRef.current;
   }, [e2e]);
+
+  useEffect(() => {
+    unlockCallAudio();
+  }, []);
 
   useEffect(() => {
     setMediaVault(e2e.vault);

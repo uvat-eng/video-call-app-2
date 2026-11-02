@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type CallKind, type GroupMember, type User } from "@/lib/messenger-data";
 import { createPeer, getMedia } from "@/lib/webrtc";
 import type { E2E } from "@/lib/e2e";
+import { playCallTone, stopCallTone } from "@/lib/callTones";
 
 export const MAX_GROUP = 20;
 export const MAX_VIDEO = 6;
@@ -267,6 +268,13 @@ export function useGroupCallSession({ group, me, token, e2e, onClose }: Params) 
     const t = window.setInterval(poll, outbox.current.length ? 700 : 1500);
     return () => window.clearInterval(t);
   }, [phase, members.length]);
+
+  useEffect(() => {
+    if (phase === "ringing") playCallTone("ringtone");
+    else stopCallTone();
+  }, [phase]);
+
+  useEffect(() => () => stopCallTone(), []);
 
   useEffect(() => {
     if (phase !== "ringing" || !group.callId) return;
